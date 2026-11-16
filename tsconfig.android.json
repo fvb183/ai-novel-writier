@@ -1,0 +1,7 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {"noUnusedLocals": false, "noUnusedParameters": false},
+  "include": ["src", "electron", "mobile"],
+  "exclude": ["src/stories", "mobile/tests", "mobile/vitest-*.config.ts"],
+  "references": []
+}

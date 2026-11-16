@@ -1,0 +1,93 @@
+# 依赖
+node_modules
+
+# 构建输出
+dist
+dist-electron
+release
+
+# 日志
+logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# 编辑器
+.vscode/*
+!.vscode/extensions.json
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 环境变量
+.env
+.env.local
+.env.*.local
+
+# 临时文件
+*.local
+dist-ssr
+tailwind.config.js.bak
+
+# 可再生的本地审查、包管理与门禁状态
+.review-temp/
+.pnpm-store/
+.workbuddy/
+.release-gate*.txt
+/.vitest-attachments/
+
+# 本地工具索引与会话
+.codegraph/
+.superpowers/
+.worktrees/
+.runtime/
+.vibe-owner.json
+
+# Never publish internal agent instructions, local review output, or compiler state.
+/AGENTS.md
+/CONTEXT.md
+/.agents/
+/.claude/
+/.codex/
+/.superpowers/
+/docs/superpowers/
+/design-qa.md
+/rule.md
+/rule.lite.md
+/output/
+/public/screenshot/
+/public/logos/
+*.tsbuildinfo
+
+# 浏览器测试失败时生成的截图，不入库
+__screenshots__/
+
+# Android generated artifacts and private signing material
+mobile-dist/
+dist-android/
+.android-font-cache/
+android/.gradle/
+android/build/
+android/local.properties
+*.keystore
+*.jks
+android-*-test-report.json
+
+# Local operational records and private recovery inventories are not public source.
+/HANDOFF.md
+/RECOVERY.md
+/recovery-manifest.json
+/recovery-source-manifest.json
+/recovered-dependency.json
+/docs/personal-windows-installer.md
+/docs/handoffs/
+/docs/development/*-validation.json
+/docs/design/**/*.mp4
+/docs/design/**/*.webm

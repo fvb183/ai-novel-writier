@@ -1,0 +1,103 @@
+import groovy.json.JsonSlurper
+import groovy.json.JsonOutput
+import java.security.KeyStore
+import java.security.MessageDigest
+
+plugins {
+    id 'com.android.application' version '8.9.2'
+}
+
+def appPackage = new JsonSlurper().parse(file('../package.json'))
+def parts = (appPackage.version =~ /^(\d+)\.(\d+)\.(\d+)$/)
+if (!parts.matches()) throw new GradleException('Android requires a numeric major.minor.patch package version')
+def major = parts.group(1).toInteger()
+def minor = parts.group(2).toInteger()
+def patch = parts.group(3).toInteger()
+if (minor > 999 || patch > 999 || major > 2099) throw new GradleException('Android version components exceed the versionCode range')
+
+android {
+    namespace 'io.github.ethanyoq.ainovelwriter'
+    compileSdk 35
+    buildToolsVersion '35.0.0'
+
+    defaultConfig {
+        applicationId 'io.github.ethanyoq.ainovelwriter'
+        minSdk 30
+        targetSdk 35
+        versionCode major * 1000000 + minor * 1000 + patch
+        versionName appPackage.version
+    }
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['java']
+            res.srcDirs = ['res']
+            assets.srcDirs = ['../mobile-dist']
+        }
+    }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_1_8
+        targetCompatibility JavaVersion.VERSION_1_8
+    }
+    buildTypes {
+        // A development APK cannot overwrite the user's existing installation.
+        debug {
+            applicationIdSuffix '.dev'
+        }
+        release {
+            minifyEnabled false
+            // Release signing is configured on the build host, never in project data.
+        }
+    }
+}
+
+dependencies {
+    // Authorization only: ordinary local writing does not require a Google account.
+    implementation 'com.google.android.gms:play-services-auth:22.0.0'
+}
+
+// Reuse an existing local development identity without copying its private key.
+// AGP's debug credentials stay inside the signing configuration and are never logged.
+def developmentKey = System.getenv('AI_NOVEL_ANDROID_DEBUG_KEYSTORE')
+def expectedDevelopmentFingerprint = System.getenv('AI_NOVEL_ANDROID_EXPECTED_DEBUG_CERT_SHA1')
+if (developmentKey) {
+    if (!file(developmentKey).isFile()) throw new GradleException('Configured development signing key is unavailable')
+    android.signingConfigs.debug.storeFile = file(developmentKey)
+}
+tasks.register('verifyDevelopmentSigning') {
+    doLast {
+        def config = android.signingConfigs.debug
+        if (!config.storeFile?.isFile()) {
+            if (developmentKey || expectedDevelopmentFingerprint) throw new GradleException('Expected development signing identity is missing')
+            return // AGP creates a new standard debug identity for a fresh development checkout.
+        }
+        def store = KeyStore.getInstance(config.storeType ?: KeyStore.getDefaultType())
+        config.storeFile.withInputStream { stream -> store.load(stream, config.storePassword.toCharArray()) }
+        def certificate = store.getCertificate(config.keyAlias)
+        if (!certificate) throw new GradleException('Development signing certificate is missing')
+        def fingerprint = MessageDigest.getInstance('SHA-1').digest(certificate.encoded).encodeHex().toString()
+        def sha256 = MessageDigest.getInstance('SHA-256').digest(certificate.encoded).encodeHex().toString()
+        if (expectedDevelopmentFingerprint) {
+            def expected = expectedDevelopmentFingerprint.replace(':', '').toLowerCase(Locale.ROOT)
+            if (!(expected ==~ /[a-f0-9]{40}/) || fingerprint != expected) {
+                throw new GradleException('Development signing certificate does not match the installed-app identity')
+            }
+        }
+        def result = [packageName: android.defaultConfig.applicationId + '.dev', certificateSha1: fingerprint,
+            certificateSha256: sha256, externalKeyReference: developmentKey != null,
+            expectedIdentityMatched: expectedDevelopmentFingerprint != null, privateKeyCopied: false]
+        def report = file('../.runtime/android-development-signing-report.json')
+        report.parentFile.mkdirs()
+        report.text = JsonOutput.prettyPrint(JsonOutput.toJson(result))
+        logger.lifecycle('Development certificate SHA-1: ' + fingerprint)
+    }
+}
+
+tasks.register('verifyWebAssets') {
+    doLast {
+        if (!file('../mobile-dist/index.html').isFile()) {
+            throw new GradleException('Run pnpm build:android:web before packaging the Android application')
+        }
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyWebAssets', 'verifyDevelopmentSigning' }

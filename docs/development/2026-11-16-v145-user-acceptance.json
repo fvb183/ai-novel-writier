@@ -1,0 +1,34 @@
+{
+  "recordedAt": "2026-11-16T15:31:25.963182+00:00",
+  "version": "1.4.5",
+  "status": "user-accepted-baseline",
+  "userStatement": "以上功能均验收，请把1.4.5作为基线并上传到云端代码仓库。",
+  "repository": "https://github.com/fvb183/ai-novel-writier.git",
+  "acceptedScope": [
+    "legacy project compatibility",
+    "mobile chapter blueprint detail navigation",
+    "model/API settings sync",
+    "declared model capability identification and unknown handling",
+    "AI小说编辑器 branding",
+    "previously accepted compact sync behavior"
+  ],
+  "newlyReportedFollowups": [
+    "blueprint recovery banner overlap and confirmed permanent draft deletion",
+    "plot-tree scrolling outside tree/detail upper boundaries",
+    "repeated generated statuses in generation guidance UI"
+  ],
+  "artifacts": [
+    {
+      "kind": "windows",
+      "path": "release/1.4.5-android-compat/ai-novel-editor-setup-1.4.5.exe",
+      "sha256": "5a89790f7ec315cf8344c7bd349f93a242b474fdbd36af5ce85aae0105e39d92",
+      "bytes": 200494647
+    },
+    {
+      "kind": "android",
+      "path": ".runtime/final-delivery/AI-Novel-Editor-Android-v1.4.5-compat-20261116.apk",
+      "sha256": "5c5a7554d926a32a88e3f3bb0c129d4b71b7aea437faec3b225193d4ba1c574c",
+      "bytes": 66738992
+    }
+  ]
+}
