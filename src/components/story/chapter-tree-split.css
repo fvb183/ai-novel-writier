@@ -1,5 +1,5 @@
 .chapter-tree-split.chapter-tree-columns { grid-template-columns:var(--chapter-tree-map-width,420px) 24px minmax(0,1fr); gap:0; }
-.chapter-tree-split-map,.chapter-tree-split-editor { min-width:0; max-width:100%; }
+.chapter-tree-split-map,.chapter-tree-split-editor { min-width:0; max-width:100%; isolation:isolate; }
 .chapter-tree-split-map[hidden],.chapter-tree-split-editor[hidden] { display:none; }
 .chapter-tree-split-map:focus,.chapter-tree-split-editor:focus { outline:none; }
 .chapter-tree-mobile-nav { grid-column:1 / -1; position:sticky; top:0; z-index:4; display:flex; align-items:center; justify-content:space-between; gap:12px; min-width:0; padding:8px 0; background:var(--surface,var(--paper)); border-bottom:1px solid var(--rule); font:12px var(--font-ui); }

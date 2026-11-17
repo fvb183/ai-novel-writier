@@ -1,0 +1,110 @@
+{
+  "format": "ai-novel-editor-android-ui-validation",
+  "version": 1,
+  "status": "validated-candidate-not-yet-user-accepted",
+  "recordedAt": "2026-11-17T05:43:20.371Z",
+  "applicationVersion": "1.4.6",
+  "acceptedBaseline": {
+    "version": "1.4.5",
+    "commit": "5d1775b29cf2c477e926604af6e175aaa40c6b77",
+    "tag": "accepted/v1.4.5-20261116",
+    "repository": "https://github.com/fvb183/ai-novel-writier",
+    "originalSourceAndArtifactsNotOverwritten": true
+  },
+  "scope": [
+    "blueprint recovery banner layout",
+    "confirmed persistent recovery deletion",
+    "tree and detail upper-edge clipping",
+    "old completion entries covering Options for this run and guidance forms"
+  ],
+  "tests": [
+    {
+      "name": "blueprint owner regressions",
+      "passed": 4,
+      "skipped": 228,
+      "failed": 0
+    },
+    {
+      "name": "blueprint editor and layout",
+      "passed": 116,
+      "skipped": 0,
+      "failed": 0
+    },
+    {
+      "name": "writing and architecture guidance",
+      "passed": 112,
+      "skipped": 0,
+      "failed": 0
+    },
+    {
+      "name": "App workflow event",
+      "passed": 1,
+      "skipped": 0,
+      "failed": 0
+    }
+  ],
+  "nativeAndroidRecoveryDeletion": {
+    "passed": true,
+    "checks": 5,
+    "syntheticSSERequests": 1,
+    "externalNetworkRequests": 0
+  },
+  "shippedBundleLayout": {
+    "passed": true,
+    "checks": 17,
+    "viewports": [
+      360,
+      393,
+      844,
+      1440
+    ],
+    "buildUnchangedDuringRun": true,
+    "syntheticNativeHost": true
+  },
+  "guidance": {
+    "newCases": 10,
+    "regressionCases": 112,
+    "staleCompletionEntriesClearedOnOpen": true,
+    "newCompletionEntriesSuppressedDuringEditing": true,
+    "errorsRecoveryUpdatesHistoryAndDirtyInputRetained": true,
+    "nestedAndStrictModeCovered": true
+  },
+  "typecheck": {
+    "desktopExitCode": 0,
+    "androidExitCode": 0
+  },
+  "artifact": {
+    "fileName": "AI-Novel-Editor-Android-v1.4.6-20261117.apk",
+    "bytes": 66741580,
+    "sha256": "54271ad5eff4b63c0bbaebc249e2f942f1937c406921ebee0b773bb5a9fbf380",
+    "packageName": "io.github.ethanyoq.ainovelwriter.dev",
+    "label": "AI小说编辑器",
+    "versionCode": 1004006,
+    "signingCertificateSha1": "9a3244ce4ad9c35b74c8ee92cd01fe68b0b537a8",
+    "signingCertificateSha256": "27fd98f6d3b4322f2488d7d4a83a73c5933c2f05e1ee84227339cba9206228f7",
+    "signatureVerified": true,
+    "upgradeCertificateMatched": true,
+    "webAssetsVerified": 218,
+    "mobileBundleSha256": "ba684d1a793f909510374aa2aa3eca9a34545629e75d733d7505db7488fe5fd2",
+    "localSourceFingerprint": "e905832aa278fb0714ff0ba4cd531fe02146586826e04349c8bd589b74b85059"
+  },
+  "sourceNote": "The local frozen source and APK assets are bound by fingerprints. Git attributes normalize line endings in the published tree.",
+  "preserved": [
+    "formal blueprints and manuscript",
+    "unrelated recovery roots",
+    "usage accounting and unknown usage liability",
+    "run history and unfinished tasks",
+    "author guidance and unsaved text"
+  ],
+  "boundaries": {
+    "realPhoneAcceptance": false,
+    "realModelApiCalls": false,
+    "realApiKeysUsed": false,
+    "realNovelOrUserScreenshotReadByTests": false,
+    "windows146InstallerBuilt": false,
+    "windows145RemainsAccepted": true,
+    "privateKeyCopied": false
+  },
+  "runtimeRecovery": "All product source files were restored byte-for-byte in an authorized workspace after storage I/O errors; the final guidance fix was then tested and rebuilt. No original source or novel was deleted.",
+  "cacheCleanup": "User-authorized cleanup is performed only after artifact export and remote verification; the local cleanup receipt records the result."
+}

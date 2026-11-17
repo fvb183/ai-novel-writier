@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 
 import type { ProjectData } from '../../../../shared/ipc-channels'
+import type { GenerationRecoveryContext } from '../../../../shared/generation-owner-contract'
 import { globalEventBus } from '../../../../shared/event-bus'
 import { setActiveProjectSessionContext } from '../../../../shared/project-session-context'
 import { disposeProjectService, initProjectService } from '../../../../services/project-service'
@@ -32,6 +33,12 @@ let manuscripts: Map<number, { title: string; body: string; finalized?: boolean 
 let nextChapter: number
 let projectCore: { premise: string } | null
 let invoke: ReturnType<typeof vi.fn>
+let recovery: GenerationRecoveryContext | null
+const recoveryHandle = { projectId: SESSION.projectId, epoch: 'original-epoch', rootActionId: 'interrupted-root', runId: 'interrupted-run' }
+function interruptedRecovery(): GenerationRecoveryContext {
+  return { handle: recoveryHandle, modelId: 'synthetic-model', operation: 'chapter-blueprint-directory', authorInputs: [], selectedDraftIds: [], selectedFinalizedDraftIds: [], selectedBlueprintChapterNumbers: [], composition: null, lastCompositionFinishReason: 'length', attemptedPurposes: ['directory-batch'], draftSave: { kind: 'absent' },
+    blueprintRecovery: { sourceHandle: recoveryHandle, leaseEpoch: SESSION.leaseId, draft: '合成未完成蓝图', editRange: { from: 1, to: 3 }, writeState: 'ready', saved: null } }
+}
 
 function blueprint(chapterNumber: number, title: string): ChapterBlueprint {
   return {
@@ -71,7 +78,8 @@ function installIpc() {
     if (channel === 'db:draft-authority-sequence') return {
       status: 'continuous', lastChapterNumber: nextChapter - 1, nextChapterNumber: nextChapter, duplicateChapterNumbers: [], authorityFingerprint: 'a'.repeat(64),
     }
-    if (channel === 'generation:find-blueprint-recovery') return null
+    if (channel === 'generation:find-blueprint-recovery') return structuredClone(recovery)
+    if (channel === 'generation:delete-blueprint-recovery') { recovery = null; return { rootActionId: recoveryHandle.rootActionId, deletedRunIds: [recoveryHandle.runId] } }
     if (channel === 'db:consistency-exemption-list') return []
     if (channel === 'db:blueprint-clear-all') {
       stored = []
@@ -153,6 +161,7 @@ beforeEach(async () => {
   manuscripts = new Map()
   nextChapter = 2
   projectCore = null
+  recovery = null
   useLocaleStore.setState({ locale: 'zh-CN' })
   useEditorStore.setState({ tabs: [], activeTabId: null, draftLedgers: {} })
   useProjectStore.setState({ currentProject: project() })
@@ -178,10 +187,76 @@ afterEach(async () => {
 })
 
 describe('蓝图阶段', () => {
+  for (const width of [360, 393]) it(`${width}px 恢复稿随页面滚动，树和详情文字不能越过导航上边缘`, async () => {
+    recovery = interruptedRecovery()
+    await renderConstrainedPage(width, 851)
+    const stage = container!.querySelector<HTMLElement>('.stage-bp')!
+    const notice = container!.querySelector<HTMLElement>('.stage-bp-recovery-notice')!
+    expect(notice.querySelector('details')!.open).toBe(false)
+    expect(notice.getBoundingClientRect().height).toBeLessThan(115)
+    expect(getComputedStyle(stage).overflowY).toBe('auto')
+    const nav = container!.querySelector<HTMLElement>('.chapter-tree-mobile-nav')!
+    stage.scrollTop = stage.scrollHeight
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    const top = stage.getBoundingClientRect().top
+    expect(notice.getBoundingClientRect().bottom).toBeLessThanOrEqual(top + 1)
+    expect(nav.getBoundingClientRect().top).toBeGreaterThanOrEqual(top)
+    expect(nav.contains(document.elementFromPoint(width / 2, nav.getBoundingClientRect().top + 4))).toBe(true)
+    const viewport = container!.querySelector<HTMLElement>('.story-tree-viewport')!
+    viewport.scrollTop = 160
+    const box = viewport.getBoundingClientRect()
+    const above = document.elementFromPoint(box.left + 20, box.top - 2)
+    expect(above?.closest('.story-tree-card')).toBeNull()
+    await act(async () => page.getByRole('button', { name: '章节详情', exact: true }).click())
+    const input = page.getByRole('textbox', { name: /主角小目标/ }).element() as HTMLTextAreaElement
+    await act(async () => page.getByRole('textbox', { name: /主角小目标/ }).fill('滚动后仍保留的合成目标。'.repeat(18)))
+    stage.scrollTop += nav.getBoundingClientRect().top - stage.getBoundingClientRect().top + 180
+    await new Promise(resolve => requestAnimationFrame(resolve))
+    expect(input.value).toContain('滚动后仍保留的合成目标')
+    expect(nav.getBoundingClientRect().top).toBeCloseTo(stage.getBoundingClientRect().top, 0)
+    expect(nav.contains(document.elementFromPoint(width / 2, stage.getBoundingClientRect().top + 4))).toBe(true)
+    expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(width)
+  })
+
+  it('取消不删除，确认后关闭对应恢复标签，重开蓝图不再显示，正式蓝图保持原样', async () => {
+    recovery = interruptedRecovery()
+    const official = structuredClone(stored)
+    await renderPage()
+    await act(async () => page.getByRole('button', { name: '编辑恢复稿', exact: true }).click())
+    expect(useEditorStore.getState().tabs.some(tab => tab.planningRecovery?.handle.runId === recoveryHandle.runId)).toBe(true)
+    await act(async () => page.getByRole('button', { name: '删除恢复稿', exact: true }).click())
+    await act(async () => page.getByRole('dialog', { name: '删除这份蓝图恢复稿？' }).getByRole('button', { name: '取消', exact: true }).click())
+    expect(calls('generation:delete-blueprint-recovery')).toHaveLength(0)
+    await act(async () => page.getByRole('button', { name: '删除恢复稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '确认删除恢复稿', exact: true }).click())
+    await vi.waitFor(() => expect(container!.querySelector('.stage-bp-recovery-notice')).toBeNull())
+    expect(calls('generation:delete-blueprint-recovery')[0]).toEqual(['generation:delete-blueprint-recovery', recoveryHandle, SESSION])
+    expect(useEditorStore.getState().tabs.some(tab => tab.planningRecovery?.handle.runId === recoveryHandle.runId)).toBe(false)
+    expect(stored).toEqual(official)
+    await act(async () => root?.render(null))
+    await renderPage()
+    expect(container!.querySelector('.stage-bp-recovery-notice')).toBeNull()
+    expect(stored).toEqual(official)
+  })
+
+  it('删除失败保留恢复稿和打开的恢复标签供重试', async () => {
+    recovery = interruptedRecovery()
+    const base = invoke.getMockImplementation() as (channel: string, ...args: unknown[]) => Promise<unknown>
+    invoke.mockImplementation(async (channel: string, ...args: unknown[]) => {
+      if (channel === 'generation:delete-blueprint-recovery') throw new Error('GENERATION_BLUEPRINT_RECOVERY_ACTIVE')
+      return base(channel, ...args)
+    })
+    await renderPage()
+    await act(async () => page.getByRole('button', { name: '编辑恢复稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '删除恢复稿', exact: true }).click())
+    await act(async () => page.getByRole('button', { name: '确认删除恢复稿', exact: true }).click())
+    await vi.waitFor(() => expect(calls('generation:delete-blueprint-recovery')).toHaveLength(1))
+    expect(container!.querySelector('.stage-bp-recovery-notice')).not.toBeNull()
+    expect(useEditorStore.getState().tabs.some(tab => tab.planningRecovery?.handle.runId === recoveryHandle.runId)).toBe(true)
+  })
   for (const [width, height] of [[393, 851], [360, 800]]) it(`${width}px 手机在被外壳裁切的工作区可从树进入全宽详情，返回保留输入并可保存`, async () => {
     await renderConstrainedPage(width, height)
     const split = container!.querySelector<HTMLElement>('.chapter-tree-split')!
-    const workspace = container!.querySelector<HTMLElement>('.chapter-tree-workspace')!
     expect(split.dataset.mobilePane).toBe('tree')
     expect(container!.querySelector<HTMLDivElement>('.chapter-tree-split-editor')!.hidden).toBe(true)
     await act(async () => page.getByRole('button', { name: '北堤', exact: true }).click())
@@ -209,8 +284,9 @@ describe('蓝图阶段', () => {
     await expect.element(purpose).toHaveValue(draft)
     const notes = page.getByRole('textbox', { name: /章节要点/ }).element()
     notes.scrollIntoView({ block: 'center' })
-    expect(getComputedStyle(workspace).overflowY).toBe('auto')
-    expect(workspace.scrollTop).toBeGreaterThan(0)
+    const scrollOwner = container!.querySelector<HTMLElement>('.stage-bp')!
+    expect(getComputedStyle(scrollOwner).overflowY).toBe('auto')
+    expect(scrollOwner.scrollTop).toBeGreaterThan(0)
     expectInsideStage(notes)
     await act(async () => page.getByRole('button', { name: '保存此章', exact: true }).click())
     await vi.waitFor(() => expect(stored.find(bp => bp.chapterNumber === 2)?.purpose).toBe(draft))

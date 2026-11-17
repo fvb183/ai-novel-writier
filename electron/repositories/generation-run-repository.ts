@@ -537,6 +537,64 @@ export class GenerationRunRepository {
     readBlueprintRecovery(runId: string): BlueprintRecoveryRead {
         return this.blueprintRecovery(runId, new Set());
     }
+    /** A planning continuation may start a new root after the author saves a
+     * prefix. Follow verified links in either direction, never unrelated history. */
+    blueprintRecoveryRoots(runId: string): string[] {
+        const target = this.get(runId);
+        if (target.binding.sourceManifest.operation !== 'chapter-blueprint-directory') fail('GENERATION_BLUEPRINT_RECOVERY_REQUIRED');
+        const roots = new Set([target.rootActionId]);
+        const links = this.db().prepare(`SELECT run_id,root_action_id,
+            json_extract(binding_json,'$."$runEffects".planningContinuation.nextHandle.rootActionId') AS next_root
+            FROM generation_runs WHERE json_extract(binding_json,'$.sourceManifest.operation')='chapter-blueprint-directory'
+            AND json_type(binding_json,'$."$runEffects".planningContinuation') IS NOT NULL`).all() as { run_id: string; root_action_id: string; next_root: string }[];
+        let added = true;
+        while (added) {
+            added = false;
+            for (const link of links) {
+                if (!roots.has(link.root_action_id) && !roots.has(link.next_root)) continue;
+                const source = this.get(link.run_id), verified = this.readPlanningContinuation(link.run_id);
+                if (!verified || source.binding.projectId !== target.binding.projectId || verified.nextHandle.projectId !== target.binding.projectId)
+                    fail('GENERATION_BLUEPRINT_RECOVERY_REQUIRED');
+                for (const id of [source.rootActionId, verified.nextHandle.rootActionId]) if (!roots.has(id)) { roots.add(id); added = true; }
+            }
+        }
+        return [...roots];
+    }
+    /** Delete only the recovery payloads and revoke old handles. Attempts and root
+     * accounting remain; formal blueprint/manuscript tables do not change. */
+    deleteBlueprintRecovery(runId: string, noLiveDispatch = false): { rootActionId: string; deletedRunIds: string[]; deletedAttemptIds: string[] } {
+        return this.transaction(() => {
+            const run = this.get(runId), roots = this.blueprintRecoveryRoots(runId), deletedRunIds: string[] = [], deletedAttemptIds: string[] = [];
+            for (const rootId of roots) {
+                const rows = this.db().prepare("SELECT run_id,json_extract(binding_json,'$.sourceManifest.operation') AS operation FROM generation_runs WHERE root_action_id=?").all(rootId) as { run_id: string; operation: string }[];
+                if (rows.some(row => row.operation !== 'chapter-blueprint-directory')) fail('GENERATION_BLUEPRINT_RECOVERY_REQUIRED');
+                if (this.portableFrozenRoot(rootId)) fail('GENERATION_PLANNING_HISTORY_READ_ONLY');
+                const interrupted = this.db().prepare("SELECT attempt_id,attempt_json FROM generation_attempts WHERE root_action_id=? AND json_extract(attempt_json,'$.status') IN ('reserved','dispatch-marked')").all(rootId) as { attempt_id: string; attempt_json: string }[];
+                if (interrupted.length && !noLiveDispatch) fail('GENERATION_BLUEPRINT_RECOVERY_ACTIVE');
+                // Startup skips author-edited roots. After the owner proves no
+                // physical dispatch remains, normalize crash remnants here while
+                // preserving unknown-dispatch token liability.
+                if (interrupted.length) {
+                    const budget = this.budget(rootId);
+                    for (const row of interrupted) {
+                        const attempt = JSON.parse(row.attempt_json) as PhysicalAttempt;
+                        attempt.status = attempt.status === 'reserved' ? 'cancelled-before-dispatch' : 'unknown';
+                        this.db().prepare('UPDATE generation_attempts SET attempt_json=? WHERE attempt_id=?').run(encode(attempt), row.attempt_id);
+                    }
+                    this.db().prepare('UPDATE generation_roots SET active_elapsed_ms=?,active_since_ms=NULL WHERE root_action_id=?').run(budget.activeElapsedMs, rootId);
+                }
+                const attempts = this.db().prepare('SELECT attempt_id FROM generation_attempts WHERE root_action_id=?').all(rootId) as { attempt_id: string }[];
+                this.db().prepare('DELETE FROM generation_artifacts WHERE run_id IN (SELECT run_id FROM generation_runs WHERE root_action_id=?)').run(rootId);
+                this.db().prepare("UPDATE generation_attempts SET usage_receipt_json=json_remove(usage_receipt_json,'$.directoryProgress','$.visibleComposition') WHERE root_action_id=?").run(rootId);
+                this.db().prepare(`UPDATE generation_runs SET binding_json=json_set(json_remove(binding_json,'$."$runEffects"'),'$."$blueprintRetirement"','recovery-deleted') WHERE root_action_id=?`).run(rootId);
+                deletedRunIds.push(...rows.map(row => row.run_id)); deletedAttemptIds.push(...attempts.map(row => row.attempt_id));
+            }
+            return { rootActionId: run.rootActionId, deletedRunIds, deletedAttemptIds };
+        });
+    }
+    isBlueprintRecoveryDeleted(runId: string): boolean {
+        return this.db().prepare(`SELECT 1 FROM generation_runs WHERE run_id=? AND json_extract(binding_json,'$."$blueprintRetirement"')='recovery-deleted'`).get(runId) !== undefined;
+    }
     private blueprintRecovery(runId: string, visiting: Set<string>): BlueprintRecoveryRead {
         const invalid = (code: BlueprintRecoveryDiagnostic['code']): BlueprintRecoveryRead => ({ kind: 'invalid', diagnostic: { runId, kind: 'invalid', code } });
         if (visiting.has(runId)) return invalid('GENERATION_DIRECTORY_PROGRESS_INVALID');
@@ -546,9 +604,9 @@ export class GenerationRunRepository {
             const marker = this.db().prepare(`SELECT json_type(binding_json,'$."$blueprintRetirement"') AS type,
                 json_extract(binding_json,'$."$blueprintRetirement"') AS value FROM generation_runs WHERE run_id=?`).get(runId) as { type: string | null; value: unknown };
             if (marker.type !== null) {
-                if (run.binding.sourceManifest.operation !== 'chapter-blueprint-directory' || marker.value !== 'blueprints-cleared')
+                if (run.binding.sourceManifest.operation !== 'chapter-blueprint-directory' || !['blueprints-cleared', 'recovery-deleted'].includes(String(marker.value)))
                     return invalid('GENERATION_DIRECTORY_PROGRESS_INVALID');
-                return { kind: 'retired', diagnostic: { runId, kind: 'retired', code: 'GENERATION_BLUEPRINTS_CLEARED' } };
+                return { kind: 'retired', diagnostic: { runId, kind: 'retired', code: marker.value === 'recovery-deleted' ? 'GENERATION_BLUEPRINT_RECOVERY_DELETED' : 'GENERATION_BLUEPRINTS_CLEARED' } };
             }
             const rows = this.db().prepare("SELECT run_id,usage_receipt_json FROM generation_attempts WHERE run_id=? AND json_type(usage_receipt_json,'$.directoryProgress') IS NOT NULL ORDER BY rowid").all(runId) as DirectoryProgressRow[];
             const progress = rows.map(row => this.readDirectoryProgressProof(row));

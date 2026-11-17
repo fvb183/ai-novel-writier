@@ -18,11 +18,13 @@ import BatchWriteDialog from './BatchWriteDialog'
 import GenerateBlueprintsDialog from './GenerateBlueprintsDialog'
 import { pluralEn } from '../../../shared/plural-en'
 import ChapterTreeWorkspace from '../../story/ChapterTreeWorkspace'
+import type { MainGenerationRunHandle } from '../../../services/generation/generation-runtime'
 
 /** 等作者确认的一步：覆盖已有蓝图、生成前的架构警告、清空全部、删除此章、清除误导入正文。 */
 type Ask =
   | { kind: 'overwrite' | 'warning'; message?: string; resolve: (ok: boolean) => void }
   | { kind: 'delete'; chapterNumber: number }
+  | { kind: 'recovery-delete'; handle: MainGenerationRunHandle }
   | { kind: 'clear' | 'legacy' }
 
 /**
@@ -155,14 +157,17 @@ export default function StageBlueprint({ projectKey, initialChapterNumber, selec
       </header>
 
       {plan.planningRecovery && (
-        <Notice
-          tone="info"
-          title={text('有一份蓝图恢复稿', 'A blueprint recovery draft is available')}
-          actions={<Button variant="secondary" size="sm" onClick={openRecovery}>{text('编辑恢复稿', 'Edit recovery draft')}</Button>}
-        >
-          {text('上次生成蓝图时中断，恢复出了一部分。列表里仍是原来的蓝图；保存恢复稿才会替换，也可以在恢复稿里接着生成缺少的章节。',
-            'The last blueprint generation stopped partway. The list still shows the original blueprints; saving the recovery draft replaces them, and you can generate the missing chapters from there.')}
-        </Notice>
+        <section className="stage-bp-recovery-notice" aria-label={text('蓝图恢复稿', 'Blueprint recovery draft')}>
+          <details>
+            <summary>{text('有一份蓝图恢复稿', 'A blueprint recovery draft is available')}</summary>
+            <p>{text('上次生成蓝图时中断，恢复出了一部分。列表里仍是原来的蓝图；保存恢复稿才会替换，也可以在恢复稿里接着生成缺少的章节。',
+              'The last blueprint generation stopped partway. The list still shows the original blueprints; saving the recovery draft replaces them, and you can generate the missing chapters from there.')}</p>
+          </details>
+          <div className="stage-bp-recovery-notice-actions">
+            <Button variant="secondary" size="sm" disabled={plan.recoveryDeleting} onClick={openRecovery}>{text('编辑恢复稿', 'Edit recovery draft')}</Button>
+            <Button variant="danger" size="sm" disabled={plan.recoveryDeleting} onClick={() => setAsk({ kind: 'recovery-delete', handle: plan.planningRecovery!.handle })}>{plan.recoveryDeleting ? text('删除中…', 'Deleting…') : text('删除恢复稿', 'Delete recovery draft')}</Button>
+          </div>
+        </section>
       )}
 
       {plan.legacyImportedTextRecoveryChapter !== null && (
@@ -198,6 +203,16 @@ export default function StageBlueprint({ projectKey, initialChapterNumber, selec
         onClose={() => setBatchOpen(false)}
       />
 
+      <DangerConfirm
+        open={ask?.kind === 'recovery-delete'}
+        onOpenChange={open => { if (!open) setAsk(null) }}
+        title={text('删除这份蓝图恢复稿？', 'Delete this blueprint recovery draft?')}
+        consequence={text('将删除这次中断生成留下的恢复稿，并关闭它已打开的恢复编辑标签。已保存的正式蓝图、章节正文和其他作品保持原样。', 'Delete the recovery draft from this interrupted generation and close its open recovery editor tabs. Saved blueprints, manuscript chapters, and other books remain unchanged.')}
+        recoverability={text('删除后无法恢复，也不会在下次打开作品时重新提示。', 'This cannot be undone. This draft will not be offered again when reopening the book.')}
+        confirmLabel={text('确认删除恢复稿', 'Delete recovery draft')}
+        cancelLabel={text('取消', 'Cancel')}
+        onConfirm={() => { if (ask?.kind === 'recovery-delete') void plan.deletePlanningRecovery(ask.handle) }}
+      />
       <DangerConfirm
         open={ask?.kind === 'overwrite'}
         onOpenChange={open => { if (!open) settle(false) }}

@@ -237,8 +237,11 @@ function ToastStack() {
     <div
       ref={stackRef}
       className="pi-toast-stack"
-      onMouseEnter={() => setPaused(true)}
-      onMouseLeave={() => setPaused(false)}
+      // Android 会在触摸后补发 mouseover，却未必补发 mouseleave；只让真正的鼠标悬停暂停计时。
+      onPointerEnter={event => { if (event.pointerType === 'mouse') setPaused(true) }}
+      onPointerLeave={() => setPaused(false)}
+      onPointerDown={event => { if (event.pointerType !== 'mouse') setPaused(false) }}
+      onPointerCancel={() => setPaused(false)}
       onWheel={event => event.stopPropagation()}
       onTouchMove={event => event.stopPropagation()}
     >

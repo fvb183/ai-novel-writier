@@ -66,7 +66,9 @@ export default function ChapterTreeSplit({ children, mobileNavigation }: {
     const target = mobilePane === 'tree'
       ? pane.querySelector<HTMLElement>('.story-tree-card-select[aria-pressed="true"]') ?? pane : pane
     const workspace = root.current?.closest<HTMLElement>('.chapter-tree-workspace')
-    if (workspace) workspace.scrollTop = 0
+    const stage = root.current?.closest<HTMLElement>('.stage-bp')
+    const scrollOwner = stage && getComputedStyle(stage).overflowY === 'auto' ? stage : workspace
+    if (scrollOwner) scrollOwner.scrollTop = 0
     target.focus({ preventScroll: true })
   }, [singlePane, mobilePane])
   const change = (value: number, persist = true) => {

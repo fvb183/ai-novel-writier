@@ -32,6 +32,13 @@ export interface ActionToastOptions {
 }
 
 const INK_TONE: Record<ActionToastType, ToastTone> = { success: 'ok', info: 'info', warning: 'warn', error: 'danger', ai: 'info' }
+let dismissWorkflowComplete: (() => void) | undefined
+const workflowCompleteSilencers = new Set<symbol>()
+
+function clearWorkflowComplete() {
+  dismissWorkflowComplete?.()
+  dismissWorkflowComplete = undefined
+}
 
 function enqueue(options: ActionToastOptions): () => void {
   return pushToast({
@@ -48,12 +55,27 @@ export const actionToast = {
 
   /** 工作流完成快捷方法 */
   workflowComplete: (message: string, openAction?: () => void | Promise<void>) => {
+    // 完成的输出仍保留在运行历史；浮动提示只留最近一次，避免遮住下一次写作指导。
+    clearWorkflowComplete()
+    // 指导窗口打开时不让后台完成提示盖住输入；结果仍由工作流写入运行历史，不在关闭时补弹。
+    if (workflowCompleteSilencers.size > 0) return () => {}
     const actions: ActionToastAction[] = []
     if (openAction) {
       const text = useLocaleStore.getState().text
       actions.push({ label: text('打开查看', 'Open'), onClick: openAction })
       actions.push({ label: text('忽略', 'Dismiss'), variant: 'ghost' })
     }
-    enqueue({ type: 'ai', message, actions, duration: openAction ? 10000 : 6000 })
+    dismissWorkflowComplete = enqueue({ type: 'ai', message, actions, duration: openAction ? 10000 : 6000 })
+    return dismissWorkflowComplete
+  },
+
+  clearWorkflowComplete,
+
+  /** 只安静处理成功完成的浮层，错误、恢复与更新通知照常保留。返回幂等的释放函数。 */
+  silenceWorkflowComplete: () => {
+    const lease = Symbol()
+    workflowCompleteSilencers.add(lease)
+    clearWorkflowComplete()
+    return () => { workflowCompleteSilencers.delete(lease) }
   },
 }

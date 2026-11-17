@@ -20,6 +20,7 @@ import { useStageStore } from '../../../stores/navigation/stage-store'
 import { useProjectStore } from '../../../stores/project-store'
 import { captureProjectSession, isProjectSessionCurrent } from '../../project-session-gate'
 import { useAnchoredLayer } from '../../ui/use-anchored-layer'
+import { useWorkflowCompletionSilence } from '../../ui/use-workflow-completion-silence'
 import SplitAction from './SplitAction'
 import WritePreflight from './WritePreflight'
 
@@ -46,6 +47,7 @@ export default function WriteChapterPopover({ chapterNumber, blueprint, label, a
   const writeRequest = useStageStore(s => s.writeRequest)
   const layer = useAnchoredLayer(align)
   const { open, show, close } = layer
+  useWorkflowCompletionSilence(open)
   const [modelId, setModelId] = useState<string | null>(null)
   const [guidance, setGuidance] = useState<string | null>(null)
   const [knowledgeHint, setKnowledgeHint] = useState('')

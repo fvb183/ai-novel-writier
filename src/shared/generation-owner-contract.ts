@@ -30,7 +30,7 @@ export interface DirectoryGenerationProgress {
 export interface BlueprintRecoveryDiagnostic {
   runId: string
   kind: 'retired' | 'invalid'
-  code: 'GENERATION_BLUEPRINTS_CLEARED' | 'GENERATION_DIRECTORY_PROGRESS_INVALID' | 'GENERATION_BLUEPRINT_AUTHOR_RECEIPT_INVALID'
+  code: 'GENERATION_BLUEPRINTS_CLEARED' | 'GENERATION_BLUEPRINT_RECOVERY_DELETED' | 'GENERATION_DIRECTORY_PROGRESS_INVALID' | 'GENERATION_BLUEPRINT_AUTHOR_RECEIPT_INVALID'
 }
 export interface DirectoryGenerationCatalog {
   progress: DirectoryGenerationProgress[]
@@ -309,6 +309,7 @@ export interface GenerationOwnerChannels {
   'generation:list-batches': { args: []; return: GenerationBatchHistory[] }
   'generation:list-recovery': { args: []; return: GenerationRecoveryList }
   'generation:find-blueprint-recovery': { args: []; return: GenerationRecoveryContext | null }
+  'generation:delete-blueprint-recovery': { args: [MainGenerationRunHandle]; return: { rootActionId: string; deletedRunIds: string[] } }
   'generation:confirm-batch-finalization': { args: [{ batchId: string; chapterNumber: number; finalizationId: string }]; return: GenerationBatchProgress }
   'generation:list-directory-progress': { args: []; return: DirectoryGenerationCatalog }
   'generation:compose-visible': { args: [MainGenerationRunHandle, string[], string | undefined, VisibleCompositionAlgorithm?]; return: VisibleCompositionReceipt }

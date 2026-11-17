@@ -99,6 +99,21 @@
   margin: var(--s-3) 28px 0;
 }
 
+.stage-bp-recovery-notice { flex:none; margin:12px 28px 0; padding:10px 12px; border:1px solid var(--rule); border-radius:8px; background:var(--paper); color:var(--ink-2); font:12px/1.6 var(--font-ui); }
+.stage-bp-recovery-notice summary { cursor:pointer; font-weight:600; color:var(--ink); }
+.stage-bp-recovery-notice p { margin:8px 0; }
+.stage-bp-recovery-notice-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:8px; }
+
+/* A single clipped scroll owner lets recovery guidance leave the screen instead
+ * of consuming a fixed slice of the phone's chapter editor. The navigation's
+ * painted surface reaches the scroll boundary; content cannot show above it. */
+@media (max-width:899px) {
+  .stage-bp { overflow-y:auto; overflow-x:hidden; overscroll-behavior-y:contain; display:block; isolation:isolate; }
+  .stage-bp > .chapter-tree-workspace { overflow:visible; padding:0 12px 24px; }
+  .stage-bp-recovery-notice { margin:10px 12px; }
+  .stage-bp .chapter-tree-mobile-nav { top:0; margin-inline:-12px; padding-inline:12px; background:var(--paper); box-shadow:0 -12px 0 0 var(--paper); }
+}
+
 .stage-bp-prewrap {
   white-space: pre-line;
 }

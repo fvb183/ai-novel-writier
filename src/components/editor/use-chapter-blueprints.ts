@@ -28,6 +28,7 @@ import { shouldRefreshBlueprints } from './blueprint-refresh'
 import { useLocaleStore } from '../../stores/locale-store'
 import { registerEditorExitSaveHandler, useEditorStore } from '../../stores/editor-store'
 import type { GenerationRecoveryContext } from '../../shared/generation-owner-contract'
+import type { MainGenerationRunHandle } from '../../services/generation/generation-runtime'
 import {
   CHAPTER_CARD_TAB_ID,
   captureBlueprintSnapshots,
@@ -97,16 +98,45 @@ export function useChapterBlueprints({
   const locale = useLocaleStore(s => s.locale)
   const currentProject = useProjectStore(s => s.currentProject)
   const [planningRecovery, setPlanningRecovery] = useState<GenerationRecoveryContext | null>(null)
+  const recoveryGate = useRef(new LatestRequestGate())
+  const deletingRecovery = useRef(false)
+  const [recoveryDeleting, setRecoveryDeleting] = useState(false)
   const latestDirectoryRun = useWorkflowStore(state => state.history.find(run => run.type === 'directory' && run.projectPath === projectKey)?.id)
   useEffect(() => {
     const session = currentProjectSessionForPath(projectKey)
     if (!session) return
     let current = true
+    const request = recoveryGate.current.begin()
     void ipc.invokeWithProjectSession(session, 'generation:find-blueprint-recovery').then(recovery => {
-      if (current && isCurrentProjectSession(session)) setPlanningRecovery(recovery)
+      if (current && recoveryGate.current.isLatest(request) && isCurrentProjectSession(session)) setPlanningRecovery(recovery)
     }).catch(() => {})
     return () => { current = false }
   }, [projectKey, currentProject?.sessionLease, latestDirectoryRun])
+  const deletePlanningRecovery = async (handle: MainGenerationRunHandle) => {
+    const session = currentProjectSessionForPath(projectKey)
+    if (!session || deletingRecovery.current) return
+    deletingRecovery.current = true; setRecoveryDeleting(true)
+    recoveryGate.current.begin()
+    try {
+      const deleted = await ipc.invokeWithProjectSession(session, 'generation:delete-blueprint-recovery', handle)
+      if (!isCurrentProjectSession(session)) return
+      for (const tab of useEditorStore.getState().tabs) {
+        if (sameProjectPathKey(tab.projectKey, projectKey) && tab.planningRecovery
+          && deleted.deletedRunIds.includes(tab.planningRecovery.handle.runId)) useEditorStore.getState().closeTab(tab.id)
+      }
+      setPlanningRecovery(previous => previous && deleted.deletedRunIds.includes(previous.handle.runId) ? null : previous)
+      const request = recoveryGate.current.begin()
+      try {
+        const next = await ipc.invokeWithProjectSession(session, 'generation:find-blueprint-recovery')
+        if (recoveryGate.current.isLatest(request) && isCurrentProjectSession(session)) setPlanningRecovery(next)
+      } catch { /* The confirmed deletion remains applied if refreshing other drafts fails. */ }
+    } catch (error) {
+      if (isCurrentProjectSession(session)) toast.error(text('删除蓝图恢复稿失败：', 'Could not delete the blueprint recovery draft: ') + displayedErrorMessage(locale, error))
+    } finally {
+      deletingRecovery.current = false
+      setRecoveryDeleting(false)
+    }
+  }
   // ✅ action 用 getState() 获取，不订阅 workflow store 高频更新
   const addLog = useWorkflowStore.getState().addLog
   const [blueprints, setBlueprints] = useState<ChapterBlueprint[]>([])
@@ -738,6 +768,8 @@ export function useChapterBlueprints({
     legacyImportedTextRecoveryChapter: projectDataReady ? legacyImportedTextRecoveryChapter : null,
     recoveringLegacyImportedText,
     planningRecovery,
+    recoveryDeleting,
+    deletePlanningRecovery,
     reload: loadBlueprints,
     updateField,
     updateChapterField,

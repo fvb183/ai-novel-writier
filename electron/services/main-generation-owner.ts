@@ -157,6 +157,7 @@ export function createMainGenerationOwner(deps: MainGenerationOwnerDependencies)
     assertCurrent()
     const run = repository.get(handle.runId)
     if (run.binding.projectId !== deps.projectId || !isDeepStrictEqual(handleOf(run), handle)) throw new Error('GENERATION_RUN_IDENTITY_MISMATCH')
+    if (repository.isBlueprintRecoveryDeleted(run.runId)) throw new Error('GENERATION_BLUEPRINT_RECOVERY_DELETED')
     if (execution) {
       repository.assertBlueprintRecoveryWritable(run.runId)
       repository.assertPlotOutlineWritable(run.runId)
@@ -344,7 +345,7 @@ export function createMainGenerationOwner(deps: MainGenerationOwnerDependencies)
   /** 本作品的全部运行，新的在前；只从库里取身份、状态与操作类型，不解析整份冻结上下文。 */
   const runSummaries = () => (deps.database.prepare(`SELECT run_id,root_action_id,status,
       json_extract(binding_json,'$.projectId','$.epoch','$.sourceManifest.operation','$.sourceManifest.batchId','$.sourceManifest.batchIntent') AS identity
-      FROM generation_runs ORDER BY created_at_ms DESC, rowid DESC`).all() as { run_id: string; root_action_id: string; status: MainGenerationRunView['status']; identity: string }[])
+      FROM generation_runs WHERE coalesce(json_extract(binding_json,'$."$blueprintRetirement"'),'') <> 'recovery-deleted' ORDER BY created_at_ms DESC, rowid DESC`).all() as { run_id: string; root_action_id: string; status: MainGenerationRunView['status']; identity: string }[])
     .map(row => {
       const [projectId, epoch, operation, batchId, batchIntent] = JSON.parse(row.identity) as [string, string, string | null, string | null, unknown]
       return { handle: { projectId, epoch, rootActionId: row.root_action_id, runId: row.run_id }, status: row.status, operation: operation ?? undefined,
@@ -1514,6 +1515,20 @@ export function createMainGenerationOwner(deps: MainGenerationOwnerDependencies)
     commitReview: (request: ReviewGenerationCommitRequest) => reviewRevisions.commitReview(request, assertSourcesCurrent),
     commitRevision: (request: RevisionGenerationCommitRequest) => reviewRevisions.commitRevision(request, assertSourcesCurrent),
     readReviewRevisionRecovery, listRecovery, findBlueprintRecovery,
+    deleteBlueprintRecovery: (handle: MainGenerationRunHandle) => {
+      const run = requireRun(handle)
+      const roots = new Set(repository.blueprintRecoveryRoots(run.runId))
+      if ([...pending.keys()].some(key => roots.has(repository.get(JSON.parse(key)[0]).rootActionId))) throw new Error('GENERATION_BLUEPRINT_RECOVERY_ACTIVE')
+      const deleted = repository.deleteBlueprintRecovery(run.runId, true)
+      service.forgetDeletedAttemptTails(deleted.deletedAttemptIds)
+      for (const attemptId of deleted.deletedAttemptIds) volatileReceipts.delete(attemptId)
+      for (const runId of deleted.deletedRunIds) {
+        const leaseId = runLeases.get(runId)
+        if (leaseId) deps.leases.close(leaseId)
+        runLeases.delete(runId)
+      }
+      return { rootActionId: deleted.rootActionId, deletedRunIds: deleted.deletedRunIds }
+    },
     readContext, readBatch, prepareDraftContext, preparedKnowledge, draftPreparationBinding, retryDraftShortOutline,
     beginBatch: (request: BeginGenerationBatchRequest) => {
       assertGenerationBatchIntent(request)

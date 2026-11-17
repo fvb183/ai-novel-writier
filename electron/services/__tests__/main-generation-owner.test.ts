@@ -618,6 +618,35 @@ describe('explicit planning recovery with real SQLite', () => {
     expect(f.owner.readContext(replacement.handle).planningContinuation).toMatchObject({ remainingRange: { from: 2, to: 3 }, targetUnits: 700 })
     expect(f.owner.readContext(run.handle).blueprintRecovery!.draft).toBe(raw)
   })
+  it('deletes a verified cross-root blueprint continuation chain after an author-prefix crash while preserving unrelated recovery and formal data', async () => {
+    const dispatch = vi.fn<GenerationRunServiceDependencies['dispatch']>(async (_request, options) => {
+      options.onVisible({ kind: 'delta', text: '{"blueprints":[{"chapterNumber":1,"title":"合成未完' })
+      return { finishReason: 'length', usage: null }
+    })
+    const f = fixture(dispatch), run = f.owner.begin(directorySelection(f))
+    const execute = (handle: typeof run.handle, invocationNonce: string) => f.owner.execute({ handle, invocationNonce,
+      task: { ...task, purpose: 'chapter-blueprint-directory', output: 'structured-data' } })
+    await execute(run.handle, 'interrupted-parent')
+    const context = f.owner.readContext(run.handle)
+    f.db.transaction(() => f.owner.commitBlueprintAuthorEdit({ mode: 'replace-range', operationId: 'retained-formal-prefix', startChapter: 1, endChapter: 1,
+      blueprints: [blueprint(1)], authorRecovery: { sourceHandle: run.handle, leaseEpoch: context.blueprintRecovery!.leaseEpoch } })).immediate()
+    const child = f.owner.restart(run.handle, { ...directorySelection(f, 2), uiActionNonce: 'author-continued' })
+    await execute(child.handle, 'interrupted-child')
+    const unrelated = f.owner.begin({ ...directorySelection(f), uiActionNonce: 'unrelated-draft' })
+    await execute(unrelated.handle, 'unrelated')
+    const official = BlueprintRepository.getAll()
+    f.db.prepare("UPDATE generation_attempts SET attempt_json=json_set(attempt_json,'$.status','dispatch-marked') WHERE run_id=?").run(run.handle.runId)
+    const reopened = f.reopen(), repository = new GenerationRunRepository(() => f.db)
+    expect(repository.budget(run.handle.rootActionId).attempts[0].status).toBe('dispatch-marked')
+    const deleted = reopened.deleteBlueprintRecovery(child.handle)
+    expect(new Set(deleted.deletedRunIds)).toEqual(new Set([run.handle.runId, child.handle.runId]))
+    expect(repository.budget(run.handle.rootActionId).attempts[0]).toMatchObject({ status: 'unknown', requestedOutputTokens: 2048 })
+    expect(BlueprintRepository.getAll()).toEqual(official)
+    expect(reopened.findBlueprintRecovery()?.handle.runId).toBe(unrelated.handle.runId)
+    expect(() => reopened.readContext(run.handle)).toThrow('GENERATION_BLUEPRINT_RECOVERY_DELETED')
+    expect(() => reopened.readContext(child.handle)).toThrow('GENERATION_BLUEPRINT_RECOVERY_DELETED')
+    expect(reopened.listRecovery().partial).toBe(false)
+  })
   it('蓝图页只向主进程要章节蓝图的恢复稿，其他生成运行不读也不返回（#536）', async () => {
     const raw = '{"blueprints":[{"chapterNumber":1,"title":"未完'
     const dispatch = vi.fn<GenerationRunServiceDependencies['dispatch']>(async (_request, options) => { options.onVisible({ kind: 'delta', text: raw }); return { finishReason: 'length', usage: null } })
@@ -1340,6 +1369,61 @@ describe('durable directory commit and remaining stage', () => {
     }).immediate()
     return { ...f, fixture: f, selection, run, dispatch, request, commit }
   }
+  it('permanently deletes only the confirmed blueprint recovery payload and revokes old handles while keeping formal data and accounting', async () => {
+    const f = directoryFixture('chapter-blueprint-directory')
+    await f.owner.execute({ handle: f.run.handle, invocationNonce: 'recovery', task: directoryTask })
+    const another = f.owner.begin({ ...f.selection, uiActionNonce: 'another-recovery' })
+    await f.owner.execute({ handle: another.handle, invocationNonce: 'another', task: directoryTask })
+    const repository = new GenerationRunRepository(() => f.fixture.db)
+    const accounting = repository.budget(f.run.handle.rootActionId)
+    const blueprints = f.fixture.db.prepare('SELECT * FROM blueprints').all()
+    const roots = f.fixture.db.prepare('SELECT * FROM generation_roots').all()
+    const deleted = f.owner.deleteBlueprintRecovery(f.run.handle)
+    expect(deleted).toEqual({ rootActionId: f.run.handle.rootActionId, deletedRunIds: [f.run.handle.runId] })
+    expect(repository.budget(f.run.handle.rootActionId)).toEqual(accounting)
+    expect(f.fixture.db.prepare('SELECT * FROM generation_roots').all()).toEqual(roots)
+    expect(f.fixture.db.prepare('SELECT * FROM blueprints').all()).toEqual(blueprints)
+    expect(f.fixture.db.prepare('SELECT * FROM generation_artifacts WHERE run_id=?').all(f.run.handle.runId)).toEqual([])
+    expect(() => f.owner.readContext(f.run.handle)).toThrow('GENERATION_BLUEPRINT_RECOVERY_DELETED')
+    expect(() => f.commit(f.owner, f.run.handle, f.request('stale-save', 1, 2), { startChapter: 1, endChapter: 3 })).toThrow('GENERATION_BLUEPRINT_RECOVERY_DELETED')
+    expect(f.owner.list().some(run => run.handle.runId === f.run.handle.runId)).toBe(false)
+    expect(f.owner.findBlueprintRecovery()?.handle.runId).toBe(another.handle.runId)
+    expect(f.owner.listRecovery().partial).toBe(false)
+    const reopened = f.fixture.reopen()
+    expect(reopened.list().some(run => run.handle.runId === f.run.handle.runId)).toBe(false)
+    expect(reopened.findBlueprintRecovery()?.handle.runId).toBe(another.handle.runId)
+    expect(() => reopened.readContext(f.run.handle)).toThrow('GENERATION_BLUEPRINT_RECOVERY_DELETED')
+  })
+  it('rolls back recovery deletion if its payload deletion fails', async () => {
+    const f = directoryFixture('chapter-blueprint-directory')
+    await f.owner.execute({ handle: f.run.handle, invocationNonce: 'recovery', task: directoryTask })
+    const tables = ['generation_roots', 'generation_runs', 'generation_attempts', 'generation_artifacts', 'blueprints']
+    const before = tables.map(table => f.fixture.db.prepare(`SELECT * FROM ${table}`).all())
+    f.fixture.db.exec("CREATE TRIGGER refuse_recovery_delete BEFORE DELETE ON generation_artifacts BEGIN SELECT RAISE(ABORT,'INJECTED_RECOVERY_DELETE_FAILURE'); END")
+    expect(() => f.owner.deleteBlueprintRecovery(f.run.handle)).toThrow('INJECTED_RECOVERY_DELETE_FAILURE')
+    tables.forEach((table, index) => expect(f.fixture.db.prepare(`SELECT * FROM ${table}`).all()).toEqual(before[index]))
+    expect(f.owner.findBlueprintRecovery()?.handle).toEqual(f.run.handle)
+  })
+  it('refuses active and foreign-root recovery deletion, but permits a crash-recovered attempt after reopen', async () => {
+    const f = directoryFixture('chapter-blueprint-directory')
+    let release!: () => void
+    f.dispatch.mockImplementationOnce(async (_request, options) => {
+      options.onVisible({ kind: 'delta', text: '未完成合成蓝图' })
+      await new Promise<void>(resolve => { release = resolve })
+      return { finishReason: 'length', usage: null }
+    })
+    const operation = f.owner.execute({ handle: f.run.handle, invocationNonce: 'running', task: directoryTask })
+    await vi.waitFor(() => expect(release).toBeDefined())
+    expect(() => f.owner.deleteBlueprintRecovery(f.run.handle)).toThrow('GENERATION_BLUEPRINT_RECOVERY_ACTIVE')
+    expect(() => f.owner.deleteBlueprintRecovery({ ...f.run.handle, rootActionId: 'foreign-root' })).toThrow('GENERATION_RUN_IDENTITY_MISMATCH')
+    release(); await operation
+    // Simulate the durable dispatch mark left by process termination. Owner admission
+    // normalizes it before exposing recovery actions on the next open.
+    f.fixture.db.prepare("UPDATE generation_attempts SET attempt_json=json_set(attempt_json,'$.status','dispatch-marked') WHERE run_id=?").run(f.run.handle.runId)
+    const reopened = f.fixture.reopen()
+    expect(new GenerationRunRepository(() => f.fixture.db).budget(f.run.handle.rootActionId).attempts[0].status).toBe('unknown')
+    expect(reopened.deleteBlueprintRecovery(f.run.handle).deletedRunIds).toEqual([f.run.handle.runId])
+  })
   it.each(['blueprint', 'project'] as const)('retires directory recovery through the %s clear while independent generation remains usable', async entry => {
     const f = directoryFixture('chapter-blueprint-directory'), range = { startChapter: 1, endChapter: 3 }
     await f.owner.execute({ handle: f.run.handle, invocationNonce: 'original', task: directoryTask })

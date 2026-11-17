@@ -79,6 +79,12 @@ android/local.properties
 *.keystore
 *.jks
 android-*-test-report.json
+*.db-wal
+*.db-shm
+*.db-journal
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite-journal
 
 # Local operational records and private recovery inventories are not public source.
 /HANDOFF.md
@@ -89,5 +95,6 @@ android-*-test-report.json
 /docs/personal-windows-installer.md
 /docs/handoffs/
 /docs/development/*-validation.json
+!/docs/development/2026-11-16-android-ui-146-validation.json
 /docs/design/**/*.mp4
 /docs/design/**/*.webm

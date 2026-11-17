@@ -1,6 +1,6 @@
 {
   "name": "ai-novel-writer",
-  "version": "1.4.5",
+  "version": "1.4.6",
   "description": "AI Novel Editor - a customized local-first workspace for long-form fiction",
   "author": "AI Novel Writer Maintainers",
   "private": true,

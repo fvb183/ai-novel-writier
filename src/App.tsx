@@ -25,12 +25,14 @@ import { useMobileLayout } from './mobile/use-mobile-layout'
 import { useAndroidAutosave } from './mobile/use-android-autosave'
 import { installAgentProjectGuard } from './stores/agent-store'
 import GoogleDriveForegroundSync from './components/sync/GoogleDriveForegroundSync'
+import { installWorkflowCompletionScope } from './components/run/workflow-completion-scope'
 
 /** 主应用：纸墨外壳（流程脊、内容区标签与按需侧页），以及全局对话框与快捷键。 */
 export default function App() {
   useMobileLayout()
   useAndroidAutosave()
   useEffect(() => installAgentProjectGuard(), [])
+  useEffect(installWorkflowCompletionScope, [])
   const initTheme = useThemeStore((s) => s.initTheme)
   const resolvedTheme = useThemeStore((s) => s.resolvedTheme)
   const initLocale = useLocaleStore((s) => s.init)

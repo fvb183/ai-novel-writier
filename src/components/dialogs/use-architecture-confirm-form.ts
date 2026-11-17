@@ -7,6 +7,7 @@ import { useLocaleStore } from '../../stores/locale-store'
 import { ipc } from '../../services/ipc-client'
 import { assertPlanningActionRange, DEFAULT_PLANNING_ACTION_CHAPTERS, DEFAULT_PLANNING_TARGET_UNITS, parsePlanningTargetUnits, PLANNING_ACTION_CHAPTER_LIMIT, PLANNING_TARGET_UNITS_LIMIT, plotOutlineLastChapter, plotOutlineNextChapter, plotOutlineRangeEffect, type PlotOutlineRangeEffect, type PlotOutlineRangeSource } from '../../shared/plot-outline-contract'
 import { displayedErrorMessage } from '../../i18n/app-errors'
+import { useWorkflowCompletionSilence } from '../ui/use-workflow-completion-silence'
 
 /**
  * 每节在本次生成里的结果：已有内容且勾选为覆盖，未勾选为保留，还没有内容为新生成。
@@ -46,6 +47,7 @@ export function useArchitectureConfirmForm({
   isOpen, onClose, archStatus, confirmed = archStatus, initialSelectedSteps, initialSynopsisRange = null, synopsisSource, onConfirm,
 }: ArchitectureConfirmFormOptions) {
   const currentProject = useProjectStore(s => s.currentProject)
+  useWorkflowCompletionSilence(isOpen && Boolean(currentProject?.novelConfig))
   const text = useLocaleStore(s => s.text)
   const locale = useLocaleStore(s => s.locale)
 

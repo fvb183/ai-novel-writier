@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
+import os from 'node:os'
 import { fileURLToPath } from 'node:url'
 import { chromium } from 'playwright'
 import { createNativeMock } from '../test/mobile-native-mock.mjs'
@@ -13,11 +14,12 @@ const build = readBuildFingerprint(root)
 const output = path.join(root, '.runtime', 'android-blueprint-layout')
 fs.mkdirSync(output, { recursive: true })
 const run = fs.mkdtempSync(path.join(output, 'run-'))
-const native = createNativeMock(run, { virtualPaths: true })
+const nativeScratch=fs.mkdtempSync(path.join(os.tmpdir(),'ai-novel-146-blueprint-native-'))
+const native = createNativeMock(nativeScratch, { virtualPaths: true })
 const selection = [], nativeOperations = [], errors = [], checks = [], screenshots = [], layout = []
 const bridge = `globalThis.AndroidBridge={
   sync(payload){const r=new XMLHttpRequest();r.open('POST','/__native',false);r.setRequestHeader('Content-Type','application/json');r.send(payload);return r.responseText},
-  request(id,payload){fetch('/__request',{method:'POST',headers:{'Content-Type':'application/json'},body:payload}).then(r=>r.json()).then(r=>globalThis.__androidResolve(id,r)).catch(e=>globalThis.__androidResolve(id,{ok:false,error:String(e)}))}
+  request(id,payload){const req=JSON.parse(payload);if(req.op==='http.request'&&String(req.args[0]).startsWith('https://blueprint.synthetic.invalid/')){globalThis.__syntheticBlueprintRequests=(globalThis.__syntheticBlueprintRequests||0)+1;queueMicrotask(()=>{globalThis.__androidEvent(id,'headers',{status:200,headers:{'content-type':'text/event-stream'},url:req.args[0]});globalThis.__androidEvent(id,'data',"ZGF0YTogeyJjaG9pY2VzIjpbeyJkZWx0YSI6eyJjb250ZW50Ijoie1wiYmx1ZXByaW50c1wiOlt7XCJjaGFwdGVyTnVtYmVyXCI6MSxcInRpdGxlXCI6XCLlkIjmiJDmnKrlrozmiJDmgaLlpI3nqL8ifSwiZmluaXNoX3JlYXNvbiI6Imxlbmd0aCJ9XX0KCmRhdGE6IFtET05FXQoK");globalThis.__androidEvent(id,'end',null)});return}fetch('/__request',{method:'POST',headers:{'Content-Type':'application/json'},body:payload}).then(r=>r.json()).then(r=>globalThis.__androidResolve(id,r)).catch(e=>globalThis.__androidResolve(id,{ok:false,error:String(e)}))}
 };`
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.ttf': 'font/ttf' }
 const server = http.createServer(async (request, response) => {
@@ -96,10 +98,16 @@ async function selectChapter(page, id) {
 async function screenshot(page, name) {
   const file = path.join(run, `${name}.png`); await page.screenshot({ path: file, fullPage: true }); screenshots.push(file)
 }
+async function resetScroll(page){await page.evaluate(()=>{const stage=document.querySelector('.stage-bp'),owner=getComputedStyle(stage).overflowY==='auto'?stage:stage.querySelector('.chapter-tree-workspace');owner.scrollTop=0})}
+async function checkClipping(page,label){
+ await page.evaluate(()=>{const stage=document.querySelector('.stage-bp');stage.scrollTop=stage.scrollHeight});await page.waitForTimeout(60)
+ const bounds=await page.evaluate(()=>{const stage=document.querySelector('.stage-bp'),nav=document.querySelector('.chapter-tree-mobile-nav'),r=nav.getBoundingClientRect();return{scrollTop:stage.scrollTop,navTop:r.top,stageTop:stage.getBoundingClientRect().top,hit:nav.contains(document.elementFromPoint(r.left+r.width/2,r.top+4)),overflow:document.documentElement.scrollWidth>innerWidth}})
+ assert.ok(bounds.scrollTop>0&&bounds.hit&&!bounds.overflow,JSON.stringify({label,...bounds}));if(label.includes('details'))assert.ok(Math.abs(bounds.navTop-bounds.stageTop)<1,JSON.stringify(bounds));checks.push(label+': no canvas or chapter text paints above navigation');await screenshot(page,label);await resetScroll(page)
+}
 async function assertDetailLayout(page, label, narrow) {
   const measurements = await page.evaluate(() => {
     const rectangle = element => { const r = element.getBoundingClientRect(); return { x: r.x, y: r.y, right: r.right, bottom: r.bottom, width: r.width, height: r.height } }
-    const workspace = document.querySelector('.stage-bp > .chapter-tree-workspace')
+    const stage=document.querySelector('.stage-bp'),workspace=getComputedStyle(stage).overflowY==='auto'?stage:document.querySelector('.stage-bp > .chapter-tree-workspace')
     const map = document.querySelector('.stage-bp .chapter-tree-split-map'), editor = document.querySelector('.stage-bp .chapter-tree-split-editor')
     return { viewport: { width: innerWidth, height: innerHeight }, documentWidth: document.documentElement.scrollWidth,
       clip: rectangle(document.querySelector('.stage-content')), title: rectangle(document.querySelector('.stage-bp-card [aria-label="章节标题"]')),
@@ -163,11 +171,11 @@ async function editReturnSave(page, id, label, nativeBack = false) {
   const notes = page.locator('.stage-bp-card').getByLabel(/章节要点/)
   await notes.scrollIntoViewIfNeeded()
   const scrolled = await page.evaluate(() => {
-    const w = document.querySelector('.stage-bp > .chapter-tree-workspace'), field = [...document.querySelectorAll('.stage-bp-card textarea')].at(-1).getBoundingClientRect(), clip = document.querySelector('.stage-content').getBoundingClientRect()
+    const stage=document.querySelector('.stage-bp'),w=getComputedStyle(stage).overflowY==='auto'?stage:document.querySelector('.stage-bp > .chapter-tree-workspace'),field = [...document.querySelectorAll('.stage-bp-card textarea')].at(-1).getBoundingClientRect(), clip = document.querySelector('.stage-content').getBoundingClientRect()
     return { scrollTop: w.scrollTop, reachable: field.top >= clip.top && field.bottom <= clip.bottom }
   })
   assert.ok(scrolled.scrollTop > 0 && scrolled.reachable, JSON.stringify(scrolled))
-  await page.locator('.stage-bp > .chapter-tree-workspace').evaluate(element => { element.scrollTop = 0 })
+  await resetScroll(page)
   await screenshot(page, `${label}-details`)
   await saveAndVerify(page, id, value)
   checks.push(`${label}: full-width detail, reachable final field, same mounted editor, selection and unsaved draft retained, explicit save persisted${nativeBack ? ', Android Back returns to tree' : ''}`)
@@ -175,13 +183,13 @@ async function editReturnSave(page, id, label, nativeBack = false) {
 try {
   browser = await chromium.launch({ headless: true, executablePath: process.env.AI_NOVEL_VITEST_CHROMIUM || (process.platform === 'win32' ? 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe' : undefined), args: ['--password-store=basic', '--use-mock-keychain'] })
   const page = await browser.newPage({ viewport: { width: 393, height: 851 }, isMobile: true, hasTouch: true, locale: 'zh-CN' })
-  diagnosticPage = page; await observe(page)
+  page.setDefaultTimeout(90000);diagnosticPage = page; await observe(page)
   await page.getByRole('button', { name: '新建作品', exact: true }).click()
   await page.getByLabel('作品名', { exact: true }).fill('手机蓝图布局合成夹具')
   selection.push(native.environment.filesDir)
   await page.getByRole('button', { name: '选择', exact: true }).click()
   await page.getByRole('button', { name: '创建作品', exact: true }).click()
-  await page.getByRole('button', { name: 'AI 写作助手', exact: true }).waitFor()
+  await page.getByRole('button', { name: 'AI 写作助手', exact: true }).waitFor({timeout:240000})
   const seeded = await page.evaluate(async () => {
     const p = globalThis.__layoutProject
     for (let chapterNumber = 1; chapterNumber <= 3; chapterNumber++) {
@@ -197,8 +205,21 @@ try {
     return { projectPath: p.path, branchId: id, routeId }
   })
   checks.push('Real new-project UI and authored-only fixture creation via shipped controllers')
+  const recoverySeed=await page.evaluate(async()=>{
+    const api=window.aiNovelAPI,model={id:'blueprint-recovery-synthetic',name:'合成恢复稿模型',provider:'openai',protocol:'openai',modelName:'synthetic-model',apiKey:'SYNTHETIC_NOT_A_REAL_KEY',baseUrl:'https://blueprint.synthetic.invalid/v1',temperature:0.7,maxTokens:2048,purposes:['generation'],capabilities:{contextWindowTokens:32768,maxOutputTokens:2048,reasoning:false,structuredOutput:false,usage:false}}
+    const saved=await api.invoke('llm:save-model',model);if(!saved.success)throw new Error(saved.error)
+    const view=await globalThis.__layoutDb('generation:begin',{operation:'chapter-blueprint-directory',uiActionNonce:'synthetic-recovery',modelId:model.id,selectedDraftIds:[],selectedFinalizedDraftIds:[],selectedBlueprintChapterNumbers:[1,2,3],promptKeys:['chapter_blueprint_chunk'],skillStages:['planning'],output:'structured-data',authorInputs:[{id:'planning:target-units',text:'700'},{id:'directory:pacing-guidance',text:'只使用合成夹具。'},{id:'directory:author-config',text:'{"totalChapters":3}'},{id:'directory:requested-range',text:'{"mode":"full","startChapter":1,"endChapter":3}'}]})
+    await globalThis.__layoutDb('generation:execute',{handle:view.handle,invocationNonce:'synthetic-interrupted',task:{purpose:'chapter-blueprint-directory',output:'structured-data',messages:[{role:'user',content:'合成恢复稿布局测试。'}]}})
+    const recovery=await globalThis.__layoutDb('generation:find-blueprint-recovery');if(!recovery?.blueprintRecovery)throw new Error('Recovery fixture was not produced')
+    return {handle:view.handle,requests:globalThis.__syntheticBlueprintRequests}
+  })
+  assert.equal(recoverySeed.requests,1)
+  checks.push('Synthetic native SSE LENGTH response creates real durable recovery through shipped generation IPC, without external network')
   await openBlueprint(page)
+  await page.getByRole('button',{name:'删除恢复稿',exact:true}).waitFor()
+  await checkClipping(page,'393-recovery-tree-scroll')
   await editReturnSave(page, 'chapter:2', '393-mainline', true)
+  await checkClipping(page,'393-recovery-details-scroll')
   await page.getByLabel('当前章节路线', { exact: true }).selectOption(seeded.routeId)
   await editReturnSave(page, seeded.branchId, '393-branch')
   await page.setViewportSize({ width: 360, height: 800 })
@@ -206,6 +227,18 @@ try {
   await page.getByLabel('当前章节路线', { exact: true }).selectOption('mainline')
   await editReturnSave(page, 'chapter:1', '360-mainline')
 
+  const beforeDelete=await page.evaluate(async()=>globalThis.__layoutDb('db:blueprint-get-all',globalThis.__layoutProject.path))
+  await resetScroll(page)
+  await page.getByRole('button',{name:'删除恢复稿',exact:true}).click()
+  const deletion=page.getByRole('dialog',{name:'删除这份蓝图恢复稿？',exact:true})
+  await deletion.getByRole('button',{name:'取消',exact:true}).click()
+  assert.equal(await page.locator('.stage-bp-recovery-notice').count(),1)
+  await page.getByRole('button',{name:'删除恢复稿',exact:true}).click()
+  await deletion.getByRole('button',{name:'确认删除恢复稿',exact:true}).click()
+  await page.locator('.stage-bp-recovery-notice').waitFor({state:'hidden'})
+  const deleted=await page.evaluate(async handle=>{const recovery=await globalThis.__layoutDb('generation:find-blueprint-recovery');let oldHandleCode;try{await globalThis.__layoutDb('generation:read-context',{handle})}catch(error){oldHandleCode=error.message}return{recovery,oldHandleCode,formal:await globalThis.__layoutDb('db:blueprint-get-all',globalThis.__layoutProject.path)}},recoverySeed.handle)
+  assert.equal(deleted.recovery,null);assert.match(deleted.oldHandleCode,/GENERATION_BLUEPRINT_RECOVERY_DELETED/);assert.deepEqual(deleted.formal,beforeDelete)
+  checks.push('Confirmed recovery deletion removes its payload and banner, rejects old handles and preserves formal blueprints; Cancel retains it')
   // A normal reopen is an existing-workspace fixture, not a claim of old-schema migration coverage.
   const previousLease = await page.evaluate(() => globalThis.__layoutProject.sessionLease)
   selection.push(seeded.projectPath)
@@ -213,6 +246,9 @@ try {
   await page.getByRole('menuitem', { name: '打开其他作品…', exact: true }).click()
   await page.waitForFunction(lease => globalThis.__layoutProject?.sessionLease !== lease, previousLease)
   await openBlueprint(page)
+  assert.equal(await page.locator('.stage-bp-recovery-notice').count(),0)
+  assert.equal(await page.evaluate(async()=>globalThis.__layoutDb('generation:find-blueprint-recovery')),null)
+  checks.push('Deleted recovery remains absent after normal close and reopen')
   await editReturnSave(page, 'chapter:2', '360-reopened-mainline')
   await page.getByLabel('当前章节路线', { exact: true }).selectOption(seeded.routeId)
   await editReturnSave(page, seeded.branchId, '360-reopened-branch')
@@ -223,7 +259,7 @@ try {
   for (const [width, height, label] of [[844, 390, '844-landscape'], [1440, 1000, '1440-desktop'], [393, 851, '393-restored-portrait']]) {
     await page.setViewportSize({ width, height })
     await page.waitForFunction(() => { const split = document.querySelector('.stage-bp .chapter-tree-split'); return split.dataset.stacked === String(split.getBoundingClientRect().width <= 899) })
-    await page.locator('.stage-bp > .chapter-tree-workspace').evaluate(element => { element.scrollTop = 0 })
+    await resetScroll(page)
     assert.equal(await page.locator('.stage-bp-card').getByLabel('章节标题', { exact: true }).inputValue(), retained)
     if (width === 1440) {
       assert.equal(await page.getByRole('separator', { name: '调整章节树与蓝图宽度', exact: true }).isVisible(), true)
@@ -247,7 +283,7 @@ try {
   await browser?.close(); await new Promise(resolve => server.close(resolve)); native.close()
   const buildUnchangedDuringRun = JSON.stringify(build) === JSON.stringify(readBuildFingerprint(root))
   if (!buildUnchangedDuringRun) { errors.push('Production bundle changed during layout validation'); process.exitCode = 1 }
-  const report = { passed: errors.length === 0, deviceTest: false, target: 'real production Android browser bundle, actual Stage shell and isolated Node native-protocol host', dataBoundary: 'synthetic private project only; no real project files, credentials, Google account, model request or external network', existingProjectCoverage: 'normal reopen of synthetic saved project; old-schema migration is covered separately', build, buildUnchangedDuringRun, checks, layout, screenshots, errors, artifacts: run }
+  const report = { passed: errors.length === 0, deviceTest: false, target: 'real production Android browser bundle, actual Stage shell and isolated Node native-protocol host', dataBoundary: 'synthetic private project only; no real project files, credentials, Google account or external network; one simulated native provider response', existingProjectCoverage: 'normal reopen of synthetic saved project; old-schema migration is covered separately', build, buildUnchangedDuringRun, checks, layout, screenshots, errors, artifacts: run }
   fs.writeFileSync(path.join(run, 'report.json'), JSON.stringify(report, null, 2) + '\n')
   fs.writeFileSync(path.join(output, 'report.json'), JSON.stringify(report, null, 2) + '\n')
   console.log(JSON.stringify(report, null, 2))
