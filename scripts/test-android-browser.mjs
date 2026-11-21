@@ -286,8 +286,15 @@ try {
     await navigation.getByRole('button', { name: /^蓝图/ }).click()
     await page.getByRole('region', { name: '章节树工作台', exact: true }).waitFor()
   }
+  async function showSelectedChapterDetails() {
+    await page.getByRole('region', { name: '章节树工作台', exact: true }).waitFor()
+    const details = page.getByRole('button', { name: '章节详情', exact: true })
+    if (await details.isVisible()) await details.click()
+  }
   async function selectStoryChapter(id, routeId = storySeed.routes[0].id) {
     await page.getByLabel('当前章节路线', { exact: true }).selectOption(routeId)
+    const back = page.getByRole('button', { name: '返回剧情树', exact: true })
+    if (await back.isVisible()) await back.click()
     await page.locator(`.stage-bp .story-tree-card[data-story-node="${id}"] .story-tree-card-select`).click()
     await page.locator(`.stage-bp .chapter-tree-inspector[data-selected-story-node="${id}"]`).waitFor()
   }
@@ -374,6 +381,7 @@ try {
   await prose.getByRole('button', { name: '保存正文', exact: true }).click()
   await waitStory(snapshot => snapshot.nodes.find(node => node.id === storySeed.ids[4])?.body === '两条路线共用的新正文', 'shared manuscript saved after explicit confirmation')
   await prose.getByRole('button', { name: '章节蓝图', exact: true }).click()
+  await showSelectedChapterDetails()
   await page.locator('.chapter-tree-management > summary').click()
   await page.getByLabel('生成依据', { exact: true }).selectOption('shared')
   await page.getByRole('button', { name: '查看并核对前情', exact: true }).click()
@@ -404,6 +412,7 @@ try {
   await page.getByText('还没有剧情梳理', { exact: true }).waitFor()
   assert.equal(await page.locator('.stage-plot .story-tree,.stage-plot .chapter-tree-workspace').count(), 0)
   await page.getByRole('button', { name: '前往章节蓝图', exact: true }).click()
+  await showSelectedChapterDetails()
   await page.locator(`.stage-bp .chapter-tree-inspector[data-selected-story-node="${storySeed.ids[4]}"]`).waitFor()
   assert.equal(await page.getByLabel('当前章节路线', { exact: true }).inputValue(), storySeed.routes[0].id)
   checks.push('Plot defaults to foreshadowing management and offers a read-only overview while structural editing returns to the same unique blueprint node and route')
