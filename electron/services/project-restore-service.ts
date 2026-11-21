@@ -1,3 +1,4 @@
+import { installProjectFileExclusive } from './project-file-install'
 import fs, { createReadStream } from 'node:fs'
 import { migrationRealpath, validatePlatformDirectoryChain } from './migration-file-system'
 import path from 'node:path'
@@ -428,9 +429,39 @@ function createInstallJournal(
   return { document, path: journal, identity }
 }
 
+// The desktop marker is a hard link to the journal. Android forbids those
+// links. Bind its separate marker to the physical journal, directory and marker
+// itself so copying either file or moving the directory cannot grant ownership.
+function androidMarkerBytes(journal: ReadInstallJournal, targetRoot: string, marker: fs.BigIntStats): Buffer {
+  const root = fs.lstatSync(targetRoot, { bigint: true })
+  const identities = [journal.identity, root, marker].map(info => [String(info.dev), String(info.ino)])
+  return Buffer.from(JSON.stringify([journal.document, identities]))
+}
+
+function createReservationMarker(journal: ReadInstallJournal, targetRoot: string): void {
+  const marker = path.join(targetRoot, INSTALL_MARKER_NAME)
+  if (process.platform !== 'android') return fs.linkSync(journal.path, marker)
+  const fd = fs.openSync(marker, 'wx', 0o600)
+  const identity = fs.fstatSync(fd, { bigint: true })
+  try {
+    fs.writeFileSync(fd, androidMarkerBytes(journal, targetRoot, identity))
+    fs.fsyncSync(fd)
+  } catch (error) {
+    unlinkIdentity(marker, identity)
+    throw error
+  } finally { fs.closeSync(fd) }
+}
+
+function verifiedMarkerIdentity(journal: ReadInstallJournal, targetRoot: string): fs.BigIntStats {
+  const marker = readPhysicalFile(path.join(targetRoot, INSTALL_MARKER_NAME))
+  if (same(marker.identity, journal.identity) && sameJournal(parseInstallJournal(marker.bytes, targetRoot), journal.document)) return marker.identity
+  if (process.platform === 'android' && marker.identity.nlink === 1n && marker.bytes.equals(androidMarkerBytes(journal, targetRoot, marker.identity))) return marker.identity
+  return fail('PORTABLE_RESTORE_UNSAFE_TARGET')
+}
+
 function releaseInstallJournal(journal: ReadInstallJournal, targetRoot: string, removeMarker: boolean): void {
   const marker = path.join(targetRoot, INSTALL_MARKER_NAME)
-  if (removeMarker) unlinkIdentity(marker, journal.identity)
+  if (removeMarker) unlinkIdentity(marker, verifiedMarkerIdentity(journal, targetRoot))
   unlinkIdentity(journal.path, journal.identity)
   activeInstallJournals.delete(normalized(journal.path))
 }
@@ -439,9 +470,7 @@ function reservationOwned(journal: ReadInstallJournal, targetRoot: string): fs.B
   const root = fs.lstatSync(targetRoot, { bigint: true })
   if (!root.isDirectory() || root.isSymbolicLink()
     || normalized(migrationRealpath(targetRoot)) !== normalized(targetRoot)) fail('PORTABLE_RESTORE_UNSAFE_TARGET')
-  const marker = readPhysicalFile(path.join(targetRoot, INSTALL_MARKER_NAME))
-  if (!same(marker.identity, journal.identity)
-    || !sameJournal(parseInstallJournal(marker.bytes, targetRoot), journal.document)) fail('PORTABLE_RESTORE_UNSAFE_TARGET')
+  verifiedMarkerIdentity(journal, targetRoot)
   return root
 }
 
@@ -685,14 +714,14 @@ async function installStagedProject(
       const descriptor = fs.openSync(temporary, 'r+')
       try { fs.fsyncSync(descriptor) } finally { fs.closeSync(descriptor) }
       if (await hashPhysicalFile(temporary) !== await hashPhysicalFile(source.path)) fail('PORTABLE_RESTORE_UNSAFE_TARGET')
-      try { fs.linkSync(temporary, target) } catch (error) {
+      const temporaryInfo = fs.lstatSync(temporary, { bigint: true })
+      try { installProjectFileExclusive(temporary, target) } catch (error) {
         if ((error as NodeJS.ErrnoException).code === 'EEXIST') fail('PORTABLE_RESTORE_UNSAFE_TARGET')
         throw error
       }
-      const temporaryInfo = fs.lstatSync(temporary, { bigint: true })
       const linked = fs.lstatSync(target, { bigint: true })
       if (!linked.isFile() || linked.isSymbolicLink() || !same(temporaryInfo, linked)) fail('PORTABLE_RESTORE_UNSAFE_TARGET')
-      fs.unlinkSync(temporary)
+      if (fs.existsSync(temporary)) unlinkIdentity(temporary, temporaryInfo)
     }
     removeOwnedFile(attempt, source.path)
   }
@@ -914,7 +943,7 @@ export async function restorePortableProject(input: RestorePortableProjectInput)
         }
         throw error
       }
-      try { fs.linkSync(journal.path, path.join(targetRoot, INSTALL_MARKER_NAME)) } catch {
+      try { createReservationMarker(journal, targetRoot) } catch {
         fail('PORTABLE_RESTORE_UNSAFE_TARGET')
       }
       reservationOwned(journal, targetRoot)

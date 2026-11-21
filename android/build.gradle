@@ -7,7 +7,7 @@ plugins {
     id 'com.android.application' version '8.9.2'
 }
 
-def appPackage = new JsonSlurper().parse(file('../package.json'))
+def appPackage = new JsonSlurper().parse(file('release.json'))
 def parts = (appPackage.version =~ /^(\d+)\.(\d+)\.(\d+)$/)
 if (!parts.matches()) throw new GradleException('Android requires a numeric major.minor.patch package version')
 def major = parts.group(1).toInteger()
@@ -15,13 +15,18 @@ def minor = parts.group(2).toInteger()
 def patch = parts.group(3).toInteger()
 if (minor > 999 || patch > 999 || major > 2099) throw new GradleException('Android version components exceed the versionCode range')
 
+def signingDir = file(System.getenv('AI_NOVEL_ANDROID_RELEASE_SIGNING_DIR') ?: '../../.private/ai-novel-editor/android-release')
+def releaseStore = new File(signingDir, 'release.p12')
+def passwordFile = new File(signingDir, 'store-password')
+def releasePassword = passwordFile.isFile() ? passwordFile.getText('UTF-8').trim() : null
+
 android {
     namespace 'io.github.ethanyoq.ainovelwriter'
     compileSdk 35
     buildToolsVersion '35.0.0'
 
     defaultConfig {
-        applicationId 'io.github.ethanyoq.ainovelwriter'
+        applicationId appPackage.applicationId
         minSdk 30
         targetSdk 35
         versionCode major * 1000000 + minor * 1000 + patch
@@ -39,6 +44,15 @@ android {
         sourceCompatibility JavaVersion.VERSION_1_8
         targetCompatibility JavaVersion.VERSION_1_8
     }
+    signingConfigs {
+        production {
+            storeType 'PKCS12'
+            storeFile releaseStore
+            storePassword releasePassword
+            keyAlias 'android-release'
+            keyPassword releasePassword
+        }
+    }
     buildTypes {
         // A development APK cannot overwrite the user's existing installation.
         debug {
@@ -46,7 +60,7 @@ android {
         }
         release {
             minifyEnabled false
-            // Release signing is configured on the build host, never in project data.
+            signingConfig signingConfigs.production
         }
     }
 }
@@ -100,4 +114,17 @@ tasks.register('verifyWebAssets') {
         }
     }
 }
-tasks.named('preBuild').configure { dependsOn 'verifyWebAssets', 'verifyDevelopmentSigning' }
+tasks.register('verifyReleaseSigning') {
+    doLast {
+        if (!releaseStore.isFile() || !releasePassword) throw new GradleException('Android release signing directory must contain release.p12 and store-password')
+        def store = KeyStore.getInstance('PKCS12')
+        releaseStore.withInputStream { stream -> store.load(stream, releasePassword.toCharArray()) }
+        def alias = android.signingConfigs.production.keyAlias
+        if (!store.isKeyEntry(alias)) throw new GradleException('Android release signing key entry missing')
+        def fingerprint = MessageDigest.getInstance('SHA-256').digest(store.getCertificate(alias).encoded).encodeHex().toString()
+        if (fingerprint != appPackage.certificateSha256) throw new GradleException('Android release signing certificate differs from the 1.0.0 baseline')
+    }
+}
+tasks.named('preBuild').configure { dependsOn 'verifyWebAssets' }
+tasks.matching { it.name == 'preDebugBuild' }.configureEach { dependsOn 'verifyDevelopmentSigning' }
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn 'verifyReleaseSigning' }

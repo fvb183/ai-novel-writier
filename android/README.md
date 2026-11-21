@@ -18,7 +18,7 @@
 
 只有显式连接时传入 `interactive: true`。静默同步传入 `false`，需要授权时返回 `GOOGLE_AUTH_REQUIRED`，不自动打开账户选择器。缺少 Google Play 服务返回 `GOOGLE_PLAY_SERVICES_UNAVAILABLE`；OAuth 包名/签名配置错误返回 `GOOGLE_OAUTH_CONFIGURATION_REQUIRED`。
 
-Google Cloud 必须启用 Drive API，并创建与实际 APK **包名及签名 SHA-1** 一致的 Android OAuth 客户端。开发包为 `io.github.ethanyoq.ainovelwriter.dev`；正式包为 `io.github.ethanyoq.ainovelwriter`。两者不能共用一个不匹配的 Android 客户端。APK 校验报告会记录公开签名指纹，不能仅根据源码猜测。
+旧云端作品使用旧 OAuth 客户端所在 Google Cloud 项目的 Drive API。请在同一项目添加 Android OAuth 客户端，保留旧客户端。1.0.0 正式包的包名为 `io.github.fvb183.ainoveleditor`，证书 SHA-1 为 `A3:F1:7F:7F:FA:12:AA:F1:4E:5E:F7:FD:A2:AA:89:4E:B8:C5:E8:D4`。开发包 `io.github.fvb183.ainoveleditor.dev` 使用单独的客户端。应用会通过 Google Play 服务申请授权。
 
 官方参考：[Android 授权](https://developer.android.com/identity/authorization)、[OAuth 令牌撤销](https://developers.google.com/identity/protocols/oauth2/native-app#tokenrevoke)。
 
@@ -26,9 +26,9 @@ Google Cloud 必须启用 Drive API，并创建与实际 APK **包名及签名 S
 
 ## 构建与校验
 
-需要 JDK 17、Android SDK platform 35 / build-tools 35.0.0。设置 `JAVA_HOME`、`ANDROID_HOME`，构建前先生成 `mobile-dist`。`scripts/build-android.mjs` 使用固定校验的 Gradle wrapper；输出位于 `android/build/outputs/apk/`。开发包使用独立包名，正式包仍需原签名才能作为覆盖升级。
+需要 JDK 17、Android SDK platform 35 / build-tools 35.0.0。设置 `JAVA_HOME`、`ANDROID_HOME`，构建前先生成 `mobile-dist`。`scripts/build-android.mjs` 使用固定校验的 Gradle wrapper；输出位于 `android/build/outputs/apk/`。1.0.0 可与 1.4.x 并存，后续正式更新须沿用 1.0.0 的签名。详见 [签名与打包说明](BUILD.md)。
 
-更新已安装的旧开发包时也必须保持签名：设置 `AI_NOVEL_ANDROID_DEBUG_KEYSTORE` 指向旧本机开发密钥，并设置公开指纹 `AI_NOVEL_ANDROID_EXPECTED_DEBUG_CERT_SHA1`。Gradle 只读取该密钥，不复制进源码、备份或报告；指纹不符即停止构建。可先运行 `node scripts/build-android.mjs --check-signing`，它只验证签名配置、不构建 APK。本机上一轮开发包的预期 SHA-1 是 `9a3244ce4ad9c35b74c8ee92cd01fe68b0b537a8`，以最终 APK 校验报告再次确认。不能以卸载旧包来绕过签名不匹配，否则会丢失应用私有数据。
+为开发包指定签名时，可使用 `AI_NOVEL_ANDROID_DEBUG_KEYSTORE` 和 `AI_NOVEL_ANDROID_EXPECTED_DEBUG_CERT_SHA1`。正式包的密钥和公开指纹由独立的发布配置管理。
 
 `node scripts/verify-android-artifact.mjs <APK路径>` 检查 APK 签名、包名、版本，以及包内每一份 Web 资源是否与当前 `mobile-dist` 完全一致，报告写入 `.runtime/android-delivery-report.json`。
 

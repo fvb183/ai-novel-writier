@@ -83,7 +83,8 @@ export interface ProjectAccessServiceOptions extends ProjectStoragePreflightOpti
 }
 
 function projectPathKey(projectPath: string): string {
-  return path.normalize(projectPath).toLocaleLowerCase('en-US')
+  const normalized = path.normalize(projectPath)
+  return process.platform === 'android' ? normalized : normalized.toLocaleLowerCase('en-US')
 }
 
 function isContainedPath(rootPath: string, targetPath: string): boolean {

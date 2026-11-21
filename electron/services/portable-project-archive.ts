@@ -1,3 +1,4 @@
+import { installProjectFileExclusive } from './project-file-install'
 import fs from 'node:fs'
 import { migrationRealpath, validatePlatformDirectoryChain } from './migration-file-system'
 import path from 'node:path'
@@ -540,7 +541,7 @@ export async function writePortableProjectArchive(input: WritePortableProjectArc
     if (error instanceof PortableProjectArchiveError) throw error
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
   }
-  // The archive is built under an unpredictable private name and only published by a no-overwrite hard link.
+  // The archive is built under an unpredictable private name and published without replacing any existing file.
   // This assumes the target parent is application-controlled; it does not claim resistance to a hostile peer process.
   const temporary = path.join(targetParent, `.portable-project-archive-${randomUUID()}.tmp`)
   let handle: fs.promises.FileHandle
@@ -611,7 +612,7 @@ export async function writePortableProjectArchive(input: WritePortableProjectArc
     const publishIdentity = await assertOpenedTarget(temporary, handle)
     input.__testHooks?.beforePublish?.(temporary, target)
     await assertOpenedTarget(temporary, handle)
-    try { fs.linkSync(temporary, target) }
+    try { installProjectFileExclusive(temporary, target) }
     catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') fail('PORTABLE_ARCHIVE_TARGET_EXISTS')
       fail('PORTABLE_ARCHIVE_PUBLISH_UNSUPPORTED')

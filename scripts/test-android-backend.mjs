@@ -259,6 +259,25 @@ try {
     assert.equal(manuscripts.length, 1); assert.ok(fs.readFileSync(bridge.hostPath(path.posix.join(projectPath, manuscripts[0])), 'utf8').includes(draft.content))
     return { publicationStatus: finalization.publicationStatus, manuscripts }
   })
+  const model = protocol => ({ id: `test-${protocol}`, name: `Test ${protocol}`, provider: protocol, protocol, modelName: 'test-generation-model', apiKey: 'test-only-not-a-real-key', baseUrl: protocol === 'openai' ? 'https://mock-api.invalid/v1' : 'https://mock-gemini.invalid', temperature: 0.7, maxTokens: 1024, purposes: ['generation'] })
+  const sse = data => `data: ${JSON.stringify(data)}\n\n`
+  await stage('finalization_generation_saves_notes_and_character_effects', async () => {
+    success(await api.invoke('llm:save-model', model('openai')))
+    const { snapshot } = await db('db:continuity-read-source', draft.id)
+    const invoke = (channel, request) => api.invoke(channel, request, context)
+    for (const [stepKey, content] of [['chapter_notes', '林舟站在港口，展开了那张泛黄的地图。'], ['character_cards', '{"updates":[]}']]) {
+      const slot = { source: snapshot.source, stepKey }
+      const recovery = await invoke('finalization-generation:begin', { slot, modelId: model('openai').id })
+      assert.equal(recovery.sourceStatus, 'current', stepKey)
+      httpPlans.push({ body: sse({ choices: [{ delta: { content }, finish_reason: 'stop' }] }) + 'data: [DONE]\n\n' })
+      const { outcome } = await invoke('finalization-generation:execute', { handle: recovery.view.handle })
+      assert.equal(outcome.status, 'completed', JSON.stringify(outcome))
+      const { artifactId, revision, textHash } = outcome.receipt.visibleArtifact
+      const effect = await invoke('finalization-generation:commit', { handle: recovery.view.handle, artifact: { artifactId, revision, textHash } })
+      assert.equal(effect.stepKey, stepKey)
+      assert.deepEqual((await invoke('finalization-generation:read', { slot })).effect, effect)
+    }
+  })
   await stage('knowledge_import_persistence_and_fulltext_search', async () => {
     const imported = success(await db('kb:import-text', 'The lighthouse keeper protects the hidden harbor. The map describes a lighthouse on the eastern island.', '灯塔设定.txt'))
     const documents = await db('kb:list-documents'); assert.ok(documents.some(document => document.id === imported.docId))
@@ -342,8 +361,6 @@ try {
     return { newIdentity: true, originalPreserved: true, archiveBytes: exported.receipt.targetByteSize }
   })
 
-  const model = protocol => ({ id: `test-${protocol}`, name: `Test ${protocol}`, provider: protocol, protocol, modelName: 'test-generation-model', apiKey: 'test-only-not-a-real-key', baseUrl: protocol === 'openai' ? 'https://mock-api.invalid/v1' : 'https://mock-gemini.invalid', temperature: 0.7, maxTokens: 1024, purposes: ['generation'] })
-  const sse = data => `data: ${JSON.stringify(data)}\n\n`
   async function collectStream(protocol, plan, options = {}) {
     const id = `test-stream-${protocol}-${httpCalls.length}`
     httpPlans.push(plan)
@@ -526,7 +543,7 @@ try {
       finally { bridge.dispatch('sqlite.close', [id]) }
     }
     const storageBeforeRead = inspectStorage()
-    assert.equal(storageBeforeRead.schemaVersion, 11, 'The mobile JSON/SQLite bridge must install the schema-11 format gate')
+    assert.equal(storageBeforeRead.schemaVersion, 12, 'The mobile JSON/SQLite bridge must install the current project schema')
     const sourceBlueprint = await db('db:blueprint-get', 1)
     success(await db('db:blueprint-delete', 1))
     const imported = await story('story:read'), importedSource = imported.nodes.find(node => node.id === 'chapter:1')

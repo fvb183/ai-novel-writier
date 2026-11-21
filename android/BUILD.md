@@ -1,6 +1,6 @@
 # Android 构建
 
-本分支把 Java WebView 宿主接到官方 1.3.0 共享业务层。最低 Android 11（API 30），目标 API 35。版本从根目录 `package.json` 读取；`1.3.0` 对应 versionCode `1003000`。
+安卓独立正式版从 1.0.0 开始，基于 1.4.7 的业务代码。最低 Android 11（API 30），目标 API 35。安卓版本、包名和公开签名指纹保存在 `android/release.json`，1.0.0 的 versionCode 为 1000000。
 
 ## 环境与命令
 
@@ -20,16 +20,13 @@ pnpm run build:android
 
 脚本以隐藏进程调用 Java，不要求安装全局 Gradle。默认将 Gradle 缓存及 Android 用户目录放在仓库忽略的 `.runtime/` 内，也尊重显式 `GRADLE_USER_HOME`、`ANDROID_USER_HOME`。
 
-调试 APK 输出目录：`android/build/outputs/apk/debug/`。调试包 ID 为 `io.github.ethanyoq.ainovelwriter.dev`，可与原应用并存，数据目录独立。构建脚本不会安装 APK，也不会修改原应用。
+开发包输出到 `android/build/outputs/apk/debug/`，包名为 `io.github.fvb183.ainoveleditor.dev`。
 
-发布候选的未签名产物：
+### 签署安卓正式包
 
-```powershell
-pnpm run build:android:web
-node scripts/build-android.mjs --release
-```
+`pnpm run build:android:release` 构建前端、签署 APK 并核对最终产物。正式包位于 `android/build/outputs/apk/release/`，包名为 `io.github.fvb183.ainoveleditor`。后续正式更新沿用此包名和签名，递增安卓版本。
 
-输出目录为 `android/build/outputs/apk/release/`。正式包 ID 保持 `io.github.ethanyoq.ainovelwriter`；覆盖原安装前必须核对原签名和迁移结果。本仓库不包含正式签名材料，也不自动签名或安装发布包。
+签名目录使用 `AI_NOVEL_ANDROID_RELEASE_SIGNING_DIR` 指定。云端开发工作区默认读取仓库旁的 `.private/ai-novel-editor/android-release/`。在授权构建机上分别提供加密 PKCS12 文件 `release.p12` 和口令文件 `store-password`，密钥别名为 `android-release`。先运行 `node scripts/build-android.mjs --release --check-signing` 可验证签名身份。Gradle 会拒绝证书与基线不符的正式构建。
 
 ## 本地验证
 

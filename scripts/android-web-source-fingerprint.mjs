@@ -15,6 +15,6 @@ export function androidWebSourceFingerprint(root) {
     } else if (stat.isFile() && !/\.(?:test|browser)\.[cm]?[jt]sx?$/.test(relative)) entries.push([relative.replaceAll('\\', '/'), hash(fs.readFileSync(file))])
   }
   for (const directory of ['src', 'mobile', 'electron', 'public']) walk(directory)
-  for (const file of ['package.json', 'vite.android.config.ts', 'scripts/android-web-source-fingerprint.mjs']) walk(file)
+  for (const file of ['package.json', 'android/release.json', 'vite.android.config.ts', 'scripts/android-web-source-fingerprint.mjs']) walk(file)
   return hash(JSON.stringify(entries))
 }

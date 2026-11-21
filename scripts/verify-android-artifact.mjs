@@ -16,7 +16,7 @@ const reportArgument = arguments_.find(value => value.startsWith('--report='))?.
 const reportPath = path.resolve(root, reportArgument || '.runtime/android-delivery-report.json')
 const reportRelative = path.relative(path.join(root, '.runtime'), reportPath)
 assert.ok(reportRelative && !reportRelative.startsWith('..') && !path.isAbsolute(reportRelative), 'Artifact report must remain inside this checkout .runtime')
-const outputDirectory = path.join(root, 'android/build/outputs/apk/debug')
+const outputDirectory = path.join(root, 'android/build/outputs/apk', arguments_.includes('--release') ? 'release' : 'debug')
 const output = explicitApk ? null : JSON.parse(fs.readFileSync(path.join(outputDirectory, 'output-metadata.json'), 'utf8'))
 if (output) assert.equal(output.elements?.length, 1, 'Specify an APK explicitly for split outputs')
 const apk = path.resolve(explicitApk || path.join(outputDirectory, output.elements[0].outputFile))
@@ -42,12 +42,20 @@ const applicationLabel = /^application-label:'([^']+)'/m.exec(badging)?.[1]
 const expectedLabel = /<string name="app_name">([^<]+)<\/string>/.exec(fs.readFileSync(path.join(root, 'android/res/values/strings.xml'), 'utf8'))?.[1]
 assert.ok(expectedLabel, 'Android source application label is missing')
 assert.equal(applicationLabel, expectedLabel, 'APK application label differs from source')
-const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'android/release.json'), 'utf8'))
 assert.equal(metadata[3], pkg.version, 'APK and app version differ')
-assert.ok(['io.github.ethanyoq.ainovelwriter.dev', 'io.github.ethanyoq.ainovelwriter'].includes(metadata[1]), 'Unexpected Android application ID')
+const release = metadata[1] === pkg.applicationId
+assert.ok(release || metadata[1] === pkg.applicationId + '.dev', 'Unexpected Android application ID')
+const [major, minor, patch] = pkg.version.split('.').map(Number)
+assert.equal(Number(metadata[2]), major * 1000000 + minor * 1000 + patch)
+if (release || arguments_.includes('--release')) {
+  assert.ok(release, 'Expected the official release application ID')
+  assert.doesNotMatch(badging, /^application-debuggable/m)
+  assert.equal(/^Signer #1 certificate SHA-256 digest: (.+)$/m.exec(signed)?.[1], pkg.certificateSha256, 'Unexpected release signing identity')
+}
 assert.match(signed, /Verified using v[23] scheme.*true/)
 const signingCertificateSha1 = /^Signer #1 certificate SHA-1 digest: (.+)$/m.exec(signed)?.[1]
-const expectedSigner = process.env.AI_NOVEL_ANDROID_EXPECTED_DEBUG_CERT_SHA1?.replaceAll(':', '').toLowerCase()
+const expectedSigner = release ? pkg.certificateSha1 : process.env.AI_NOVEL_ANDROID_EXPECTED_DEBUG_CERT_SHA1?.replaceAll(':', '').toLowerCase()
 if (expectedSigner) assert.equal(signingCertificateSha1, expectedSigner, 'APK signing certificate differs from the expected upgrade identity')
 const extracted = unzipSync(bytes, { filter: entry => entry.name.startsWith('assets/') })
 const native = unzipSync(bytes, { filter: entry => /^classes\d*\.dex$/.test(entry.name) })
@@ -81,7 +89,9 @@ const manifest = files(webRoot).map(relative => {
   assert.equal(digest(extracted[archive]), digest(original), `APK contains a stale web resource: ${relative}`)
   return { path: relative.replaceAll('\\', '/'), bytes: original.length, sha256: digest(original) }
 })
-const packaged = Object.keys(extracted).filter(name => !name.endsWith('/')).sort()
+// Release builds may include ART's binary startup profiles alongside the web files.
+const artProfiles = new Set(release ? ['assets/dexopt/baseline.prof', 'assets/dexopt/baseline.profm'] : [])
+const packaged = Object.keys(extracted).filter(name => !name.endsWith('/') && !artProfiles.has(name)).sort()
 assert.deepEqual(packaged, manifest.map(entry => `assets/${entry.path}`).sort(), 'APK contains extra stale web resources')
 const report = {
   checkedAt: new Date().toISOString(), apk, bytes: bytes.length, sha256: digest(bytes),

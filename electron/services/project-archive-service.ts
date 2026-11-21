@@ -1,3 +1,4 @@
+import { installProjectFileExclusive } from './project-file-install'
 import { validateStoredSyncHistory } from './project-sync-history'
 import fs, { createReadStream } from 'node:fs'
 import { migrationRealpath, validatePlatformDirectoryChain } from './migration-file-system'
@@ -962,7 +963,7 @@ function publishStagedArchive(stagedArchivePath: string, targetPath: string): fs
     fail('PORTABLE_ASSET_UNSAFE')
   }
   safeDirectory(path.dirname(targetPath))
-  try { fs.linkSync(stagedArchivePath, targetPath) }
+  try { installProjectFileExclusive(stagedArchivePath, targetPath) }
   catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'EEXIST') {
       throw new PortableProjectArchiveError('PORTABLE_ARCHIVE_TARGET_EXISTS')

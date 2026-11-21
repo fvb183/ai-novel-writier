@@ -12,6 +12,7 @@ import type { StepCallbacks, WorkflowContext } from '../../stores/workflow-store
 import type { AllInvokeChannels, InvokeChannel, ProjectSessionContext } from '../../shared/ipc-channels'
 import { ipc } from '../ipc-client'
 import { localize } from '../../i18n/core'
+import { finalizationStepErrorCode } from '../../shared/finalization-step-error'
 import { displayedErrorMessage } from '../../i18n/app-errors'
 import type { Locale } from '../../i18n/types'
 
@@ -167,10 +168,38 @@ export async function readPostProcessStatus(
       }
     }
 
+    if (sourceType === 'chapter_finalize' && typeof document !== 'undefined' && document.documentElement.dataset.platform === 'android') {
+      await recheckAndroidFinalization(status, Number(sourceId), run.triggerSourceId, projectSession)
+    }
     return status
   } catch {
     return null
   }
+}
+
+/** 1.4.6 could reject an unchanged binding before dispatch. Recheck its exact
+ * persisted slot on read, without rewriting the failure or starting a model call. */
+async function recheckAndroidFinalization(
+  status: PostProcessStatus, chapterNumber: number, triggerSourceId: string, session?: ProjectSessionContext,
+): Promise<void> {
+  const failed = (['chapter_notes', 'character_cards'] as const).filter(key => {
+    const step = status.steps[key]
+    const code = step && !step.ok && finalizationStepErrorCode(step.error ?? '')
+    return code === 'GENERATION_SOURCE_CHANGED' || code === 'FINALIZATION_GENERATION_SOURCE_CHANGED'
+  })
+  if (!failed.length || !session) return
+  try {
+    const draft = await ipc.invokeWithProjectSession(session, 'db:draft-get-finalized', chapterNumber, session.projectPath)
+    if (!draft) return
+    const current = await ipc.invokeWithProjectSession(session, 'db:continuity-read-source', draft.id, session.projectPath)
+    if (current.status !== 'valid' || triggerSourceId !== `finalization:${current.snapshot.source.finalizationId}`) return
+    for (const stepKey of failed) {
+      const recovery = await ipc.invokeWithProjectSession(session, 'finalization-generation:read', { slot: { source: current.snapshot.source, stepKey } })
+      if (recovery?.sourceStatus === 'current' && !recovery.latestAttempt?.inFlight) {
+        status.steps[stepKey]!.error = 'FINALIZATION_GENERATION_SOURCE_REVALIDATED'
+      }
+    }
+  } catch { /* Preserve the failure and the next-chapter guard when a slot cannot be verified. */ }
 }
 
 /** 快捷检查：所有关键步骤是否通过 */

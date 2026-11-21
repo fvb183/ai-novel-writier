@@ -260,7 +260,7 @@ describe('createRepairFinalizeWorkflow', () => {
       }])),
     })
 
-    function retryCard(persisted: Row[] | null, stepKey?: string) {
+    function retryCard(persisted: Row[] | null, stepKey?: string, recoveryStatus?: 'current' | 'conflict') {
       useProjectStore.setState({
         currentProject: { id: PROJECT_SESSION.projectId, name: 'Repair finalize', path: PROJECT_PATH, sessionLease: PROJECT_SESSION.leaseId } as never,
       })
@@ -271,7 +271,8 @@ describe('createRepairFinalizeWorkflow', () => {
           case 'db:continuity-read-source': return finalizedSource('已定稿正文')
           case 'db:blueprint-get': return { title: '定稿标题', characters: [] }
           case 'db:post-process-get-latest-run':
-            return persisted && { id: 9, triggerSourceType: 'chapter_finalize', triggerSourceId: '3', sourceLabel: '第3章定稿', allCriticalPassed: false, createdAt: '', updatedAt: '' }
+            return persisted && { id: 9, triggerSourceType: 'chapter_finalize', triggerSourceId: recoveryStatus ? 'finalization:finalization-17' : '3', sourceLabel: '第3章定稿', allCriticalPassed: false, createdAt: '', updatedAt: '' }
+          case 'finalization-generation:read': return { sourceStatus: recoveryStatus }
           case 'db:post-process-get-steps':
             return persisted!.map(row => ({ label: row.stepKey, critical: false, lastAttemptAt: '', attemptCount: 1, ...row }))
           default: throw new Error(`unexpected IPC: ${channel}`)
@@ -340,6 +341,19 @@ describe('createRepairFinalizeWorkflow', () => {
         { stepKey: 'character_cards', ok: false, errorMsg: 'FINALIZED_CHARACTER_FIELD_CONFLICT' },
       ], 'character_cards')).rejects.toThrow('没有可以重试的失败步骤')
       expect(postProcess.execute).not.toHaveBeenCalled()
+    })
+
+    it.each(['GENERATION_SOURCE_CHANGED', 'FINALIZATION_GENERATION_SOURCE_CHANGED'])('repairs a verified Android source after a saved %s failure', async errorMsg => {
+      vi.stubGlobal('document', { documentElement: { dataset: { platform: 'android' } } })
+      const rows = [
+        { stepKey: 'kb_import', ok: true },
+        { stepKey: 'chapter_notes', ok: false, errorMsg },
+        { stepKey: 'character_cards', ok: false, errorMsg: 'GENERATION_FINALIZATION_PREDECESSOR_REQUIRED' },
+      ]
+      await expect(retryCard(rows, undefined, 'conflict')).rejects.toThrow('没有可以重试的失败步骤')
+      expect(postProcess.execute).not.toHaveBeenCalled()
+      await retryCard(rows, undefined, 'current')
+      expect(postProcess.params).toEqual([expect.objectContaining({ onlyFailed: true, stepKeys: ['chapter_notes', 'character_cards'] })])
     })
 
     it('runs nothing when no failed step can be retried', async () => {

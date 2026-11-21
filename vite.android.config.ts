@@ -5,7 +5,7 @@ import path from 'node:path'
 import fs from 'node:fs'
 import { androidWebSourceFingerprint } from './scripts/android-web-source-fingerprint.mjs'
 const root=path.resolve(import.meta.dirname)
-const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'))
+const pkg=JSON.parse(fs.readFileSync(path.join(root,'android','release.json'),'utf8'))
 let androidOutDir=path.join(root,'mobile-dist')
 let sourceFingerprint=''
 const shim=(file:string)=>path.join(root,'mobile/shims',file+'.ts')

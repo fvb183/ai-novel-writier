@@ -7,6 +7,8 @@ type StepRetry = 'prompt' | 'described' | 'never' | { after: string }
 
 /** 定稿后处理步骤的错误码。步骤记录里存错误码本身，界面展示时再按当前界面语言换成作者可读说明。 */
 const FINALIZATION_STEP_ERRORS: { code: RegExp; zh: string; en: string; retry: StepRetry }[] = [
+  { code: /^FINALIZATION_GENERATION_SOURCE_REVALIDATED$/, retry: 'described',
+    zh: '已核对定稿正文和模型设置。可以点「重试」继续处理这一章。', en: 'The finalized manuscript and model settings have been verified. Select Retry to finish processing this chapter.' },
   { code: /^FINALIZATION_GENERATION_INCOMPLETE$/, retry: 'prompt',
     zh: '模型这次没有返回完整结果（连接中断或输出被截断）。', en: 'The model did not return a complete result (the connection dropped or the output was cut off).' },
   { code: /^FINALIZATION_GENERATION_(ARTIFACT_REQUIRED|OUTCOME_UNKNOWN)$/, retry: 'prompt',

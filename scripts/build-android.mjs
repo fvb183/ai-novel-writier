@@ -32,7 +32,7 @@ if (!process.env.ANDROID_HOME && !process.env.ANDROID_SDK_ROOT
 }
 const result = spawnSync(java, [
   '-classpath', path.join(android, 'gradle', 'wrapper', 'gradle-wrapper.jar'),
-  'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', checkSigning ? 'verifyDevelopmentSigning' : `assemble${variant}`,
+  'org.gradle.wrapper.GradleWrapperMain', '--no-daemon', checkSigning ? (variant === 'Release' ? 'verifyReleaseSigning' : 'verifyDevelopmentSigning') : `assemble${variant}`,
 ], {
   cwd: android, stdio: 'inherit', windowsHide: true,
   env: {
@@ -43,6 +43,5 @@ const result = spawnSync(java, [
 })
 if (result.error) throw result.error
 if (result.status !== 0) process.exit(result.status ?? 1)
-if (checkSigning) { console.log('Development signing identity verified; no APK was built.'); process.exit(0) }
+if (checkSigning) { console.log(`${variant} signing identity verified; no APK was built.`); process.exit(0) }
 console.log(`Android ${variant.toLowerCase()} output: ${path.join(android, 'build', 'outputs', 'apk', variant.toLowerCase())}`)
-if (variant === 'Release') console.log('Release output is unsigned. Apply the original signing identity before an upgrade installation.')

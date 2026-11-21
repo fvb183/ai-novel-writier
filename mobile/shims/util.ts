@@ -1,11 +1,23 @@
 export function isDeepStrictEqual(left: any, right: any): boolean {
-  const visited = new WeakMap<object, object>()
+  const activeLeft = new WeakMap<object, object>()
+  const activeRight = new WeakMap<object, object>()
   function same(a: any, b: any): boolean {
     if (Object.is(a, b)) return true
     if (!a || !b || typeof a !== 'object' || typeof b !== 'object') return false
     if (Object.getPrototypeOf(a) !== Object.getPrototypeOf(b)) return false
-    if (visited.has(a)) return visited.get(a) === b
-    visited.set(a, b)
+    // JSON persistence duplicates shared subobjects. Only active ancestors are
+    // cycles; equal values on independent branches may have different identities.
+    if (activeLeft.has(a) || activeRight.has(b)) return activeLeft.get(a) === b && activeRight.get(b) === a
+    activeLeft.set(a, b)
+    activeRight.set(b, a)
+    try {
+      return sameContents(a, b)
+    } finally {
+      activeLeft.delete(a)
+      activeRight.delete(b)
+    }
+  }
+  function sameContents(a: any, b: any): boolean {
     if (a instanceof Date) return Object.is(a.getTime(), b.getTime())
     if (a instanceof RegExp) return a.source === b.source && a.flags === b.flags && a.lastIndex === b.lastIndex
     if (ArrayBuffer.isView(a)) {
